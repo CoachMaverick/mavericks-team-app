@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Mavericks 12U theme - dark by default */
+    --background: 0 0% 4%;           /* #0A0A0A near black */
+    --foreground: 0 0% 98%;          /* white */
+    --card: 0 0% 7%;                 /* #121212 */
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 6%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 72% 51%;            /* #DC2626 bold red */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 0 84% 60%;             /* brighter red for highlights */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 0 72% 51%;
+    --radius: 0.625rem;
+  }
+
+  .light {
+    /* Light mode support (clean white with red accents) */
+    --background: 0 0% 98%;
+    --foreground: 240 10% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 9%;
+    --primary: 0 72% 51%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 240 10% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 0 72% 51%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 0 72% 51%;
+  }
+}
+
+/* Base resets and sporty enhancements */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+/* Mavericks sporty custom classes */
+.mavericks-header {
+  @apply border-b border-border bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60;
+}
+
+.mavericks-card {
+  @apply bg-card border border-border rounded-xl shadow-sm hover:shadow-md transition-all;
+}
+
+.mavericks-red-accent {
+  @apply border-l-4 border-primary pl-4;
+}
+
+.mavericks-btn-primary {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90 font-semibold transition-colors active:scale-[0.985];
+}
+
+.mavericks-btn-outline {
+  @apply border border-border bg-transparent hover:bg-muted text-foreground;
+}
+
+/* FullCalendar sporty overrides (red/black theme) */
+.fc {
+  --fc-border-color: hsl(var(--border));
+  --fc-page-bg-color: hsl(var(--background));
+  --fc-neutral-bg-color: hsl(var(--card));
+  --fc-neutral-text-color: hsl(var(--foreground));
+  --fc-today-bg-color: rgba(220, 38, 38, 0.08);
+}
+
+.fc .fc-toolbar-title {
+  @apply text-xl font-bold tracking-tight;
+}
+
+.fc .fc-button-primary {
+  @apply bg-primary text-white border-primary hover:bg-primary/90 shadow-none;
+}
+
+.fc-event {
+  @apply !rounded-md !border-0 text-sm font-medium shadow-sm;
+  background-color: #DC2626 !important;
+  color: white !important;
+}
+
+.fc-event:hover {
+  filter: brightness(1.1);
+}
+
+/* Chat bubbles - sporty */
+.chat-bubble {
+  @apply max-w-[80%] rounded-2xl px-4 py-2.5 text-sm;
+}
+
+.chat-bubble-team {
+  @apply bg-card border border-border;
+}
+
+.chat-bubble-mine {
+  @apply bg-primary text-primary-foreground ml-auto;
+}
+
+/* Mobile bottom nav */
+.bottom-nav {
+  @apply fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur md:hidden;
+}
+
+/* Nice empty states, pills */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-12 text-center text-muted-foreground;
+}
+
+.status-pill {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
+
+.status-pending { @apply bg-amber-500/10 text-amber-600 dark:text-amber-400; }
+.status-paid { @apply bg-emerald-500/10 text-emerald-600 dark:text-emerald-400; }
+.status-overdue { @apply bg-red-500/10 text-red-600 dark:text-red-400; }
+
+/* Team logo placeholder */
+.team-logo {
+  @apply flex items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-2xl tracking-tighter border-2 border-white/20;
+}
+
+/* Mobile friendly tables */
+@media (max-width: 640px) {
+  .table-responsive {
+    @apply block overflow-x-auto whitespace-nowrap;
+  }
+}
+
+/* Sporty focus states */
+button:focus-visible, a:focus-visible, input:focus-visible {
+  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
