@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createClient } from '@/lib/supabase/client';
+import { getInvoices } from '@/lib/actions';
 import { toast } from "sonner";
 
 interface SafeInvoice {
@@ -15,6 +16,7 @@ interface SafeInvoice {
   due_date: string;
   status?: string | null;
   description?: string | null;
+  [key: string]: any;  // for .select('*')
 }
 
 export default function AdminPage() {
@@ -30,20 +32,10 @@ export default function AdminPage() {
     setLoading(true);
     setLoadError(null);
 
-    // Basic SELECT - try/catch ONLY this call. Use ONLY simple guaranteed columns to prevent 400.
+    // Use shared ultra-safe getInvoices (uses .select('*') + try/catch + returns [])
     try {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('id, amount_cents, due_date, status, description')
-        .order('due_date', { ascending: true })
-        .limit(100);
-
-      if (error) {
-        console.error("PAGE ERROR:", error);
-        console.error('[Admin] invoices select error:', error);
-        throw error;
-      }
-      setInvoices((data || []) as SafeInvoice[]);
+      const fetched = await getInvoices();
+      setInvoices((fetched || []) as SafeInvoice[]);
     } catch (e: any) {
       console.error("PAGE ERROR:", e);
       console.error('[Admin] load invoices failed:', e);

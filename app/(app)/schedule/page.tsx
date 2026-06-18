@@ -3,23 +3,12 @@ import { cookies } from "next/headers";
 import { FullCalendarWrapper } from "@/components/schedule/FullCalendarWrapper";
 import { Card, CardContent } from "@/components/ui/card";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { getEvents } from "@/lib/actions";
 
 export const dynamic = 'force-dynamic';
 
-interface SafeEvent {
-  id: number | string;
-  title?: string | null;
-  type?: string | null;
-  start_time?: string | null;
-  end_time?: string | null;
-  location?: string | null;
-  opponent?: string | null;
-  description?: string | null;
-  is_cancelled?: boolean | null;
-}
-
 export default async function SchedulePage() {
-  let events: SafeEvent[] = [];
+  let events: any[] = [];
   let isCoach = false;
   let hasError = false;
   let errorMsg = '';
@@ -44,7 +33,7 @@ export default async function SchedulePage() {
           try {
             const { data: prof } = await supabase
               .from("profiles")
-              .select("role, is_admin")
+              .select("*")
               .eq("id", user.id)
               .maybeSingle();
             isCoach = (prof as any)?.role === 'coach' || (prof as any)?.role === 'admin' || (prof as any)?.is_admin === true;
@@ -61,35 +50,14 @@ export default async function SchedulePage() {
       isCoach = isTempCoach;
     }
 
-    // 2. Minimal events SELECT - separate try, basic columns only, NO joins
+    // Use shared safe function (which uses .select('*') + try/catch + returns [])
     try {
-      const { data, error } = await supabase
-        .from("events")
-        .select("id, title, type, start_time, end_time, location, opponent, description, is_cancelled")
-        .order("start_time", { ascending: true })
-        .limit(100);
-
-      if (error) {
-        console.error("PAGE ERROR:", error);
-        console.error('[Schedule] events select error:', error);
-        throw error;
-      }
-      events = (data || [])
-        .filter((e: any) => e && e.id != null && e.start_time)
-        .map((e: any) => ({
-          id: e.id,
-          title: e.title ?? null,
-          type: e.type ?? null,
-          start_time: e.start_time ?? null,
-          end_time: e.end_time ?? null,
-          location: e.location ?? null,
-          opponent: e.opponent ?? null,
-          description: e.description ?? null,
-          is_cancelled: e.is_cancelled ?? false,
-        })) as SafeEvent[];
+      const fetched = await getEvents();
+      events = (fetched || [])
+        .filter((e: any) => e && e.id != null && e.start_time);
     } catch (evErr: any) {
       console.error("PAGE ERROR:", evErr);
-      console.error('[Schedule] events query failed:', evErr);
+      console.error('[Schedule] getEvents failed:', evErr);
       events = [];
       hasError = true;
       errorMsg = 'Failed to load events.';
@@ -145,16 +113,16 @@ export default async function SchedulePage() {
           </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            {events.slice(0, 12).map((ev) => (
-              <Card key={String(ev.id)} className="mavericks-card">
+            {events.slice(0, 12).map((ev: any) => (
+              <Card key={String(ev?.id)} className="mavericks-card">
                 <CardContent className="p-4 space-y-1 text-sm">
-                  <div className="font-semibold">{ev.title || 'Untitled'}</div>
+                  <div className="font-semibold">{ev?.title || 'Untitled'}</div>
                   <div className="text-muted-foreground text-xs">
-                    {ev.start_time ? new Date(ev.start_time).toLocaleString() : 'TBD'}
+                    {ev?.start_time ? (() => { try { return new Date(ev.start_time).toLocaleString(); } catch { return 'TBD'; } })() : 'TBD'}
                   </div>
-                  {ev.location && <div>Location: {ev.location}</div>}
-                  {ev.opponent && <div>vs {ev.opponent}</div>}
-                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{ev.type || 'event'}</div>
+                  {ev?.location && <div>Location: {ev.location}</div>}
+                  {ev?.opponent && <div>vs {ev.opponent}</div>}
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{ev?.type || 'event'}</div>
                 </CardContent>
               </Card>
             ))}

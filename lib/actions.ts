@@ -226,10 +226,10 @@ export async function getEvents(options?: { upcomingOnly?: boolean; limit?: numb
   try {
     const supabase = await getSupabaseForReadWrite();
 
-    // Minimal explicit columns (safe after table reset)
+    // Ultra-safe: use simple .select('*')
     let query = supabase
       .from("events")
-      .select("id, title, type, start_time, end_time, location, opponent, description, is_cancelled, created_at")
+      .select("*")
       .order("start_time", { ascending: true });
 
     if (options?.upcomingOnly) {
@@ -244,12 +244,14 @@ export async function getEvents(options?: { upcomingOnly?: boolean; limit?: numb
     const { data, error } = await query;
 
     if (error) {
+      console.error("PAGE ERROR:", error);
       console.warn("getEvents error (returning empty):", error.message);
       return [];
     }
 
     return data || [];
   } catch (e: any) {
+    console.error("PAGE ERROR:", e);
     console.warn('[getEvents] error (returning empty):', e?.message);
     return [];
   }
@@ -263,10 +265,11 @@ export async function getRsvpCountsForEvents(eventIds: (number | string)[]): Pro
 
     const { data: rsvps, error } = await supabase
       .from("rsvps")
-      .select("event_id, response")
+      .select("*")
       .in("event_id", eventIds.map(id => Number(id)));
 
     if (error || !rsvps) {
+      console.error("PAGE ERROR:", error);
       return {};
     }
 
@@ -302,11 +305,14 @@ export async function getRsvpsForEvents(eventIds: (number | string)[]): Promise<
   try {
     const { data: rsvps, error } = await supabase
       .from("rsvps")
-      .select("event_id, response, family_name, notes, created_at")
+      .select("*")
       .in("event_id", eventIds.map(id => Number(id)))
       .order("created_at", { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error("PAGE ERROR:", error);
+      throw error;
+    }
 
     const byEvent: Record<number | string, any[]> = {};
     eventIds.forEach(id => { byEvent[id] = []; });
@@ -805,19 +811,23 @@ export async function getInvoices(familyId?: string) {
   console.log('[getInvoices] called fresh (noStore) familyId=', familyId);
   const supabase = await getSupabaseForReadWrite();
   try {
-    // ULTRA MINIMAL safe query: simple columns only to match current table and avoid 400
+    // Ultra-safe: use simple .select('*')
     let query = supabase.from('invoices')
-      .select('id, amount_cents, due_date, status, description')
+      .select('*')
       .order('due_date', { ascending: true });
     if (familyId) {
       query = query.eq('family_id', familyId);
     }
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      console.error("PAGE ERROR:", error);
+      throw error;
+    }
     const invData = Array.isArray(data) ? data.filter((i: any) => i && typeof i === 'object') : [];
     console.log('[getInvoices] returned', invData.length, 'rows (real DB or privileged)');
     return invData;
   } catch (e: any) {
+    console.error("PAGE ERROR:", e);
     console.warn('[getInvoices] query failed, returning empty. err:', e?.message || e);
     return [];
   }
