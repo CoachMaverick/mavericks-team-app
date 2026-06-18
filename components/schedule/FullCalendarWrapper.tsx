@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { updateEvent, deleteEvent, createRsvp } from "@/lib/actions";
+import { createRsvp } from "@/lib/actions";
 import type { Event } from "@/lib/supabase/types";
 import { createClient } from '@/lib/supabase/client';
 
@@ -24,6 +24,8 @@ interface FullCalendarWrapperProps {
   initialRsvpCounts?: Record<number | string, { yes: number; no: number; maybe: number; total: number }>;
   rsvpsByEvent?: Record<number | string, any[]>;
   rosterPlayers?: any[];
+  showAddDialog?: boolean;
+  onShowAddDialogChange?: (open: boolean) => void;
 }
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
@@ -39,7 +41,9 @@ export function FullCalendarWrapper({
   isCoach,
   initialRsvpCounts = {},
   rsvpsByEvent = {},
-  rosterPlayers = []
+  rosterPlayers = [],
+  showAddDialog: showAddDialogProp,
+  onShowAddDialogChange,
 }: FullCalendarWrapperProps) {
   const router = useRouter();
   const [events, setEvents] = useState<Event[]>(initialEvents);
@@ -72,7 +76,15 @@ export function FullCalendarWrapper({
     if (rosterPlayers) setRosterPlayersState(rosterPlayers);
   }, [rosterPlayers]);
 
-  const [showAddDialog, setShowAddDialog] = useState(false);
+  // Support controlled add dialog (for page's bottom "Add New Event" button) + internal fallback
+  const [internalShowAddDialog, setInternalShowAddDialog] = useState(false);
+  const isControlledAdd = typeof showAddDialogProp === "boolean";
+  const showAddDialog = isControlledAdd ? showAddDialogProp : internalShowAddDialog;
+  const setShowAddDialog = (open: boolean) => {
+    if (onShowAddDialogChange) onShowAddDialogChange(open);
+    if (!isControlledAdd) setInternalShowAddDialog(open);
+  };
+
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
 
@@ -125,6 +137,22 @@ export function FullCalendarWrapper({
     });
   };
 
+  // Fresh fetch after mutations so calendar + parent data stay in sync (stable after save)
+  async function reloadEventsFromDb() {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("start_time", { ascending: true });
+      if (!error && Array.isArray(data)) {
+        setEvents(data as any);
+      }
+    } catch (e: any) {
+      console.error("Schedule error (reloadEventsFromDb):", e);
+    }
+  }
+
   const handleEventClick = (clickInfo: EventClickArg) => {
     const dbEvent = clickInfo.event.extendedProps as Event;
     if (dbEvent?.id) {
@@ -160,7 +188,7 @@ export function FullCalendarWrapper({
     try {
       // Use only columns that exist in the current events table.
       // id is auto-generated, created_by/updated etc. omitted to avoid missing column errors.
-      // end_time is optional.
+      // end_time is optional (include key only when provided).
       const insertPayload: any = {
         title: formData.title,
         type: formData.type,
@@ -176,7 +204,7 @@ export function FullCalendarWrapper({
         insertPayload.opponent = formData.opponent;
       }
 
-      const { data: inserted, error } = await supabase
+      const { data: inserted, error } = await (supabase as any)
         .from("events")
         .insert(insertPayload)
         .select("*")
@@ -192,12 +220,12 @@ export function FullCalendarWrapper({
       setShowAddDialog(false);
       resetForm();
 
-      // Optimistic add to local state for immediate UI
+      // Optimistic + reload fresh from DB for consistency
       if (inserted) {
         setEvents((prev) => [...prev, inserted as any]);
       }
-
-      router.refresh(); // in case parent re-renders
+      await reloadEventsFromDb();
+      router.refresh();
     } catch (e: any) {
       console.error("Schedule error:", e);
       toast.error(e.message || "Failed to create event");
@@ -220,55 +248,91 @@ export function FullCalendarWrapper({
     setSelectedEvent(null);
   };
 
-  // Coach: Update
+  // Coach: Update - direct client update + try/catch + handle end_time safely
   const handleUpdate = async () => {
     if (!editingEvent) return;
 
+    const supabase = createClient();
     try {
-      await updateEvent(editingEvent.id as number | string, {
+      // Build minimal payload. Only include end_time when a value is provided (matches create pattern)
+      // Avoids "column does not exist" or type errors for end_time/updated_at in some prod schemas.
+      const updatePayload: any = {
         title: formData.title,
         type: formData.type,
         start_time: new Date(formData.start).toISOString(),
-        end_time: formData.end ? new Date(formData.end).toISOString() : null,
         location: formData.location || null,
-        opponent: formData.opponent || null,
         description: formData.description || null,
-      });
+      };
+
+      if (formData.end) {
+        updatePayload.end_time = new Date(formData.end).toISOString();
+      }
+      if (formData.opponent) {
+        updatePayload.opponent = formData.opponent;
+      }
+      // Never send updated_at/created_by here to stay compatible
+
+      const { error } = await (supabase as any)
+        .from("events")
+        .update(updatePayload)
+        .eq("id", editingEvent.id);
+
+      if (error) {
+        console.error("Schedule error (updateEvent):", error);
+        console.error("Update payload:", updatePayload);
+        throw new Error(error.message || "Update failed");
+      }
 
       toast.success("Event updated");
       setShowEditDialog(false);
       setEditingEvent(null);
 
-      // Optimistic local update
+      // Optimistic local update (correct keys, no formData pollution)
+      const newStart = new Date(formData.start).toISOString();
+      const newEnd = formData.end ? new Date(formData.end).toISOString() : (editingEvent as any).end_time || null;
       setEvents((prev) =>
         prev.map((e) =>
           e.id === editingEvent.id
             ? {
                 ...e,
-                ...formData,
-                start_time: new Date(formData.start).toISOString(),
-                end_time: formData.end ? new Date(formData.end).toISOString() : null,
+                title: formData.title,
+                type: formData.type,
+                start_time: newStart,
+                end_time: newEnd,
+                location: formData.location || null,
+                opponent: formData.opponent || null,
+                description: formData.description || null,
               } as Event
             : e
         )
       );
+
+      await reloadEventsFromDb();
       router.refresh();
     } catch (e: any) {
+      console.error("Schedule error:", e);
       toast.error(e.message || "Failed to update event");
     }
   };
 
-  // Coach: Delete
+  // Coach: Delete - direct + try/catch
   const handleDelete = async (eventId: number | string) => {
     if (!confirm("Delete this event permanently?")) return;
 
+    const supabase = createClient();
     try {
-      await deleteEvent(eventId);
+      const { error } = await (supabase as any).from("events").delete().eq("id", eventId);
+      if (error) {
+        console.error("Schedule error (deleteEvent):", error);
+        throw new Error(error.message || "Delete failed");
+      }
       toast.success("Event deleted");
       setSelectedEvent(null);
       setEvents((prev) => prev.filter((e) => e.id !== eventId));
+      await reloadEventsFromDb();
       router.refresh();
     } catch (e: any) {
+      console.error("Schedule error:", e);
       toast.error(e.message || "Failed to delete event");
     }
   };

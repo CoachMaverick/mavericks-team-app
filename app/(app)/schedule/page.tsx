@@ -15,6 +15,9 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Controlled state for Add dialog so bottom button can open the real modal in wrapper
+  const [showAddDialog, setShowAddDialog] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     setLoadError(null);
@@ -132,17 +135,20 @@ export default function SchedulePage() {
               initialRsvpCounts={rsvpCounts}
               rsvpsByEvent={rsvpsByEvent}
               rosterPlayers={rosterPlayers}
+              showAddDialog={showAddDialog}
+              onShowAddDialogChange={setShowAddDialog}
             />
           </ErrorBoundary>
         )}
 
-        <p>Full calendar and event features will be restored soon.</p>
-        <button 
-          onClick={() => alert('Add Event clicked - coming soon')}
-          className="mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg"
-        >
-          Add New Event
-        </button>
+        {isCoach && (
+          <button 
+            onClick={() => setShowAddDialog(true)}
+            className="mt-4 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
+          >
+            Add New Event
+          </button>
+        )}
       </div>
     </div>
   );

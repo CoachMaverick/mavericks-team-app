@@ -75,63 +75,77 @@ export async function createEvent(data: {
   opponent?: string | null;
   description?: string | null;
 }) {
-  const supabase = await getSupabaseForReadWrite();
-
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
-
-  let createdBy: string | null = null;
-  if (!isTemp) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not authenticated");
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role, is_admin")
-      .eq("id", user.id)
-      .single() as { data: { role?: string; is_admin?: boolean } | null };
-
-    if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
-      throw new Error("Only coaches can create events");
-    }
-    createdBy = user.id;
-  }
-
-  if (!data.title || !data.start_time) {
-    throw new Error("Title and start time are required");
-  }
-
-  const insertPayload: any = {
-    title: data.title,
-    type: data.type,
-    start_time: data.start_time,
-    end_time: data.end_time || null,
-    location: data.location || null,
-    opponent: data.opponent || null,
-    description: data.description || null,
-    created_by: createdBy,
-  };
-
-  const { error } = await supabase.from("events").insert(insertPayload);
-
-  if (error) throw new Error(error.message);
-
-  revalidateTag("events");
-
-  // Core notification: new event (temp coach + coaches). Real multi-user targeting in future.
   try {
-    const cookieStore = await cookies();
-    const isT = cookieStore.get("temp-coach")?.value === "1";
-    await createNotification(
-      isT ? 'temp-coach-id' : 'temp-coach-id', // placeholder; for real would fanout to coaches/parents
-      'event_new',
-      `New Event: ${data.title}`,
-      `${data.type} on ${new Date(data.start_time).toLocaleDateString()}`,
-      '/schedule'
-    );
-  } catch {}
+    const supabase = await getSupabaseForReadWrite();
 
-  return { success: true };
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
+
+    let createdBy: string | null = null;
+    if (!isTemp) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_admin")
+        .eq("id", user.id)
+        .single() as { data: { role?: string; is_admin?: boolean } | null };
+
+      if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
+        throw new Error("Only coaches can create events");
+      }
+      createdBy = user.id;
+    }
+
+    if (!data.title || !data.start_time) {
+      throw new Error("Title and start time are required");
+    }
+
+    const insertPayload: any = {
+      title: data.title,
+      type: data.type,
+      start_time: data.start_time,
+      location: data.location || null,
+      description: data.description || null,
+    };
+
+    // end_time only when provided (avoid column issues on some schemas)
+    if (data.end_time) {
+      insertPayload.end_time = data.end_time;
+    }
+    if (data.opponent) {
+      insertPayload.opponent = data.opponent;
+    }
+    insertPayload.created_by = createdBy;
+
+    const { error } = await supabase.from("events").insert(insertPayload);
+
+    if (error) {
+      console.error("Schedule error (createEvent action):", error);
+      throw new Error(error.message);
+    }
+
+    revalidateTag("events");
+
+    // Core notification: new event (temp coach + coaches). Real multi-user targeting in future.
+    try {
+      const cookieStore = await cookies();
+      const isT = cookieStore.get("temp-coach")?.value === "1";
+      await createNotification(
+        isT ? 'temp-coach-id' : 'temp-coach-id', // placeholder; for real would fanout to coaches/parents
+        'event_new',
+        `New Event: ${data.title}`,
+        `${data.type} on ${new Date(data.start_time).toLocaleDateString()}`,
+        '/schedule'
+      );
+    } catch {}
+
+    return { success: true };
+  } catch (e: any) {
+    console.error("Schedule error (createEvent):", e);
+    throw e;
+  }
 }
 
 export async function updateEvent(eventId: number | string, data: {
@@ -144,80 +158,101 @@ export async function updateEvent(eventId: number | string, data: {
   description?: string | null;
   is_cancelled?: boolean;
 }) {
-  const supabase = await getSupabaseForReadWrite();
-
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
-
-  if (!isTemp) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not authenticated");
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role, is_admin")
-      .eq("id", user.id)
-      .single() as { data: { role?: string; is_admin?: boolean } | null };
-
-    if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
-      throw new Error("Only coaches can update events");
-    }
-  }
-
-  const { error } = await (supabase as any)
-    .from("events")
-    .update({
-      ...data,
-      updated_at: new Date().toISOString(),
-    } as any)
-    .eq("id", eventId);
-
-  if (error) throw new Error(error.message);
-
-  revalidateTag("events");
-
-  // Core notifs for update / cancel
   try {
-    const notifType = data.is_cancelled ? 'event_canceled' : 'event_updated';
-    await createNotification(
-      'temp-coach-id',
-      notifType,
-      data.is_cancelled ? 'Event Canceled' : 'Event Updated',
-      `Check /schedule for details (id ${eventId})`,
-      '/schedule'
-    );
-  } catch {}
+    const supabase = await getSupabaseForReadWrite();
 
-  return { success: true };
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
+
+    if (!isTemp) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_admin")
+        .eq("id", user.id)
+        .single() as { data: { role?: string; is_admin?: boolean } | null };
+
+      if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
+        throw new Error("Only coaches can update events");
+      }
+    }
+
+    // Safe payload: omit updated_at (may not exist in all prod DBs), handle end_time conditionally
+    const updatePayload: any = { ...data };
+    if (updatePayload.end_time === undefined) {
+      delete updatePayload.end_time; // don't send unless caller provided
+    }
+    // remove updated_at if present to avoid "column does not exist"
+    delete updatePayload.updated_at;
+
+    const { error } = await (supabase as any)
+      .from("events")
+      .update(updatePayload as any)
+      .eq("id", eventId);
+
+    if (error) {
+      console.error("Schedule error (updateEvent action):", error);
+      throw new Error(error.message);
+    }
+
+    revalidateTag("events");
+
+    // Core notifs for update / cancel
+    try {
+      const notifType = data.is_cancelled ? 'event_canceled' : 'event_updated';
+      await createNotification(
+        'temp-coach-id',
+        notifType,
+        data.is_cancelled ? 'Event Canceled' : 'Event Updated',
+        `Check /schedule for details (id ${eventId})`,
+        '/schedule'
+      );
+    } catch {}
+
+    return { success: true };
+  } catch (e: any) {
+    console.error("Schedule error (updateEvent):", e);
+    throw e;
+  }
 }
 
 export async function deleteEvent(eventId: number | string) {
-  const supabase = await getSupabaseForReadWrite();
+  try {
+    const supabase = await getSupabaseForReadWrite();
 
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
 
-  if (!isTemp) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not authenticated");
+    if (!isTemp) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role, is_admin")
-      .eq("id", user.id)
-      .single() as { data: { role?: string; is_admin?: boolean } | null };
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, is_admin")
+        .eq("id", user.id)
+        .single() as { data: { role?: string; is_admin?: boolean } | null };
 
-    if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
-      throw new Error("Only coaches can delete events");
+      if (profile?.role !== "coach" && profile?.role !== "admin" && profile?.is_admin !== true) {
+        throw new Error("Only coaches can delete events");
+      }
     }
+
+    const { error } = await supabase.from("events").delete().eq("id", eventId);
+
+    if (error) {
+      console.error("Schedule error (deleteEvent action):", error);
+      throw new Error(error.message);
+    }
+
+    revalidateTag("events");
+    return { success: true };
+  } catch (e: any) {
+    console.error("Schedule error (deleteEvent):", e);
+    throw e;
   }
-
-  const { error } = await supabase.from("events").delete().eq("id", eventId);
-
-  if (error) throw new Error(error.message);
-
-  revalidateTag("events");
-  return { success: true };
 }
 
 // Fetch events (used by schedule and dashboard)
