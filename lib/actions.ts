@@ -442,26 +442,30 @@ export async function getRoster() {
     if (error) throw error;
     return (data || []) as any[];
   } catch {
-    // Rich demo data with contacts for temp/roster testing
-    const now = new Date();
-    return [
-      {
-        id: 'p1', family_id: 'fam1', first_name: 'Liam', last_name: 'Johnson', jersey_number: 12, position: 'Pitcher', date_of_birth: '2013-04-15', notes: null, is_active: true, created_at: now.toISOString(),
-        family: { id: 'fam1', name: 'Johnson Family', email: 'johnson.parent@email.com', phone: '(555) 123-4567', parent_names: 'Alex & Jordan Johnson', primary_parent: { first_name: 'Alex', last_name: 'Johnson', phone: '(555) 123-4567', email: 'johnson.parent@email.com' } }
-      },
-      {
-        id: 'p2', family_id: 'fam1', first_name: 'Noah', last_name: 'Johnson', jersey_number: 7, position: 'Shortstop', date_of_birth: '2013-08-22', notes: null, is_active: true, created_at: now.toISOString(),
-        family: { id: 'fam1', name: 'Johnson Family', email: 'johnson.parent@email.com', phone: '(555) 123-4567', parent_names: 'Alex & Jordan Johnson', primary_parent: { first_name: 'Alex', last_name: 'Johnson', phone: '(555) 123-4567', email: 'johnson.parent@email.com' } }
-      },
-      {
-        id: 'p3', family_id: 'fam2', first_name: 'Sophia', last_name: 'Martinez', jersey_number: 22, position: 'Outfield', date_of_birth: '2013-02-03', notes: null, is_active: true, created_at: now.toISOString(),
-        family: { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com', phone: '(555) 987-6543', parent_names: 'Maria Martinez', primary_parent: { first_name: 'Maria', last_name: 'Martinez', phone: '(555) 987-6543', email: 'martinez@email.com' } }
-      },
-      {
-        id: 'p4', family_id: 'fam2', first_name: 'Mateo', last_name: 'Martinez', jersey_number: 3, position: 'Catcher', date_of_birth: '2014-01-10', notes: null, is_active: true, created_at: now.toISOString(),
-        family: { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com', phone: '(555) 987-6543', parent_names: 'Maria Martinez', primary_parent: { first_name: 'Maria', last_name: 'Martinez', phone: '(555) 987-6543', email: 'martinez@email.com' } }
-      },
-    ] as any;
+    if (isTemp) {
+      // Rich demo data with contacts for temp/roster testing
+      const now = new Date();
+      return [
+        {
+          id: 'p1', family_id: 'fam1', first_name: 'Liam', last_name: 'Johnson', jersey_number: 12, position: 'Pitcher', date_of_birth: '2013-04-15', notes: null, is_active: true, created_at: now.toISOString(),
+          family: { id: 'fam1', name: 'Johnson Family', email: 'johnson.parent@email.com', phone: '(555) 123-4567', parent_names: 'Alex & Jordan Johnson', primary_parent: { first_name: 'Alex', last_name: 'Johnson', phone: '(555) 123-4567', email: 'johnson.parent@email.com' } }
+        },
+        {
+          id: 'p2', family_id: 'fam1', first_name: 'Noah', last_name: 'Johnson', jersey_number: 7, position: 'Shortstop', date_of_birth: '2013-08-22', notes: null, is_active: true, created_at: now.toISOString(),
+          family: { id: 'fam1', name: 'Johnson Family', email: 'johnson.parent@email.com', phone: '(555) 123-4567', parent_names: 'Alex & Jordan Johnson', primary_parent: { first_name: 'Alex', last_name: 'Johnson', phone: '(555) 123-4567', email: 'johnson.parent@email.com' } }
+        },
+        {
+          id: 'p3', family_id: 'fam2', first_name: 'Sophia', last_name: 'Martinez', jersey_number: 22, position: 'Outfield', date_of_birth: '2013-02-03', notes: null, is_active: true, created_at: now.toISOString(),
+          family: { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com', phone: '(555) 987-6543', parent_names: 'Maria Martinez', primary_parent: { first_name: 'Maria', last_name: 'Martinez', phone: '(555) 987-6543', email: 'martinez@email.com' } }
+        },
+        {
+          id: 'p4', family_id: 'fam2', first_name: 'Mateo', last_name: 'Martinez', jersey_number: 3, position: 'Catcher', date_of_birth: '2014-01-10', notes: null, is_active: true, created_at: now.toISOString(),
+          family: { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com', phone: '(555) 987-6543', parent_names: 'Maria Martinez', primary_parent: { first_name: 'Maria', last_name: 'Martinez', phone: '(555) 987-6543', email: 'martinez@email.com' } }
+        },
+      ] as any;
+    }
+    // For real users with missing tables/columns, return empty so dashboard can show "0 players"
+    return [] as any[];
   }
 }
 
@@ -1194,21 +1198,23 @@ export async function getTeamPaymentSummary() {
   console.log('[getTeamPaymentSummary] called fresh (noStore)');
   const supabase = await getSupabaseForReadWrite();
   try {
-    const { data: invoices = [] } = await supabase.from('invoices').select('amount_cents, status, due_date, family_id');
-    const outstanding = (invoices || []).filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled');
+    const { data: invoices, error } = await supabase.from('invoices').select('amount_cents, status, due_date, family_id');
+    if (error) throw error;
+    const invList = invoices || [];
+    const outstanding = invList.filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled');
     const totalOwedCents = outstanding.reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
     const uniqueFamilies = new Set(outstanding.map((i: any) => i.family_id));
     const today = new Date().toISOString().split('T')[0];
     const upcoming = outstanding.filter((i: any) => i.due_date >= today);
     const upcomingCents = upcoming.reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
-    const paidCount = (invoices || []).filter((i: any) => i.status === 'paid').length;
+    const paidCount = invList.filter((i: any) => i.status === 'paid').length;
     return {
       totalOwedCents,
       familiesWithBalance: uniqueFamilies.size,
       upcomingCents,
       upcomingCount: upcoming.length,
       paidCount,
-      totalInvoices: (invoices || []).length,
+      totalInvoices: invList.length,
     };
   } catch (e: any) {
     console.warn('[getTeamPaymentSummary] err, returning empty summary:', e?.message);

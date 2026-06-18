@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { Calendar, MessageCircle, CreditCard, Users } from "lucide-react";
@@ -10,16 +9,41 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   // All data fetched fresh on load (actions use noStore() + service role for temp/demo)
-  const summary = await getTeamPaymentSummary().catch(() => ({
+  // Use broad try/catch + per-call fallbacks so dashboard loads even with missing tables/columns
+  let summary = {
     totalOwedCents: 0,
     familiesWithBalance: 0,
     upcomingCents: 0,
     upcomingCount: 0,
     paidCount: 0,
     totalInvoices: 0,
-  }));
+  };
+  let allInvoices: any[] = [];
+  let upcomingEventsRaw: any[] = [];
+  let roster: any[] = [];
+  let recentMsgs: any[] = [];
+  let pinnedAnns: any[] = [];
 
-  const allInvoices = await getInvoices().catch(() => [] as any[]);
+  try {
+    summary = await getTeamPaymentSummary().catch(() => ({
+      totalOwedCents: 0,
+      familiesWithBalance: 0,
+      upcomingCents: 0,
+      upcomingCount: 0,
+      paidCount: 0,
+      totalInvoices: 0,
+    }));
+
+    allInvoices = await getInvoices().catch(() => [] as any[]);
+    upcomingEventsRaw = await getEvents({ upcomingOnly: true, limit: 5 }).catch(() => [] as any[]);
+    roster = await getRoster().catch(() => [] as any[]);
+    recentMsgs = await getMessages('team', null, 8).catch(() => [] as any[]);
+    pinnedAnns = await getPinnedAnnouncements().catch(() => [] as any[]);
+  } catch (e: any) {
+    console.warn('[Dashboard] data fetch error (falling back to empty):', e?.message || e);
+    // defaults already initialized above
+  }
+
   const paidCents = allInvoices
     .filter((i: any) => i.status === 'paid')
     .reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
@@ -31,8 +55,6 @@ export default async function DashboardPage() {
   );
 
   // Upcoming events (next 3-5)
-  const upcomingEventsRaw = await getEvents({ upcomingOnly: true, limit: 5 }).catch(() => [] as any[]);
-
   const upcomingEvents = upcomingEventsRaw.map((ev: any) => {
     const startDate = new Date(ev.start_time);
     const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -47,12 +69,10 @@ export default async function DashboardPage() {
   });
 
   // Roster snapshot
-  const roster = await getRoster().catch(() => [] as any[]);
   const totalPlayers = roster.length;
   const activeFamilies = new Set(roster.map((p: any) => p.family_id).filter(Boolean)).size;
 
   // Recent Activity: latest team chat messages (most recent first)
-  const recentMsgs = await getMessages('team', null, 8).catch(() => [] as any[]);
   let recentActivity = [...recentMsgs]
     .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 4)
@@ -64,7 +84,6 @@ export default async function DashboardPage() {
     }));
 
   // Mix in a recent pinned announcement if available (for variety in activity feed)
-  const pinnedAnns = await getPinnedAnnouncements().catch(() => [] as any[]);
   if (pinnedAnns.length > 0 && recentActivity.length < 4) {
     const a = pinnedAnns[0];
     recentActivity = [

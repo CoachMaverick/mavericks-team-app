@@ -30,13 +30,18 @@ export default async function AppLayout({
     user = realUser;
 
     // Fetch profile, now including is_admin. Prioritize real profile data.
-    const { data: realProfile } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", realUser.id)
-      .single<Profile>();
-
-    profile = realProfile;
+    // Wrapped to survive missing 'profiles' table or columns in prod Supabase.
+    try {
+      const { data: realProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", realUser.id)
+        .single<Profile>();
+      profile = realProfile;
+    } catch (e) {
+      console.warn("Profile fetch failed in layout (missing table/columns?):", (e as any)?.message);
+      profile = null;
+    }
 
     // When real admin (is_admin=true) detected, we do not use temp bypass.
   } else if (isTempCoachCookie) {
