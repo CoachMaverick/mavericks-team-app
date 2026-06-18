@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { FullCalendarWrapper } from "@/components/schedule/FullCalendarWrapper";
 import { Card, CardContent } from "@/components/ui/card";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { getEvents, getRsvpCountsForEvents, getRsvpsForEvents, getRoster } from "@/lib/actions";
 
 export const dynamic = 'force-dynamic';
 
@@ -22,14 +21,13 @@ export default async function SchedulePage() {
   try {
     const supabase = await createClient();
 
-    // 1. Auth + coach check - wrapped
+    // Auth + coach detection (wrapped)
     try {
       if (isTempCoach) {
         isCoach = true;
       } else {
         const { data: { user } } = await supabase.auth.getUser().catch((e) => {
-          console.error("PAGE ERROR:", e);
-          console.error('[Schedule] auth.getUser error:', e);
+          console.error("Schedule error:", e);
           return { data: { user: null } };
         });
         if (user) {
@@ -41,61 +39,115 @@ export default async function SchedulePage() {
               .maybeSingle();
             isCoach = (prof as any)?.role === 'coach' || (prof as any)?.role === 'admin' || (prof as any)?.is_admin === true;
           } catch (profErr: any) {
-            console.error("PAGE ERROR:", profErr);
-            console.error('[Schedule] profile query error:', profErr);
+            console.error("Schedule error:", profErr);
             isCoach = false;
           }
         }
       }
     } catch (authErr: any) {
-      console.error("PAGE ERROR:", authErr);
-      console.error('[Schedule] auth/coach check failed:', authErr);
+      console.error("Schedule error:", authErr);
       isCoach = isTempCoach;
     }
 
-    // 2. Events - safe via action
+    // Events - simple .select('*')
     try {
-      const fetched = await getEvents().catch((e) => {
-        console.error("PAGE ERROR:", e);
-        return [] as any[];
-      });
-      events = (fetched || []).filter((e: any) => e && e.id != null && e.start_time);
-    } catch (evErr: any) {
-      console.error("PAGE ERROR:", evErr);
-      console.error('[Schedule] getEvents failed:', evErr);
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("start_time", { ascending: true });
+      if (error) {
+        console.error("Schedule error:", error);
+        throw error;
+      }
+      events = (data || []).filter((e: any) => e && e.id != null && e.start_time);
+    } catch (e: any) {
+      console.error("Schedule error:", e);
       events = [];
     }
 
-    // 3. RSVPs and Roster - ultra safe, return empty on error
-    try {
-      const eventIds = events.map((e: any) => e.id);
-      if (eventIds.length > 0) {
-        rsvpCounts = await getRsvpCountsForEvents(eventIds).catch((e) => {
-          console.error("PAGE ERROR:", e);
-          console.error('[Schedule] getRsvpCounts failed:', e);
-          return {} as any;
+    const eventIds = events.map((e: any) => e.id);
+
+    // RSVPs counts - simple .select('*')
+    if (eventIds.length > 0) {
+      try {
+        const { data: rsvps, error } = await supabase
+          .from("rsvps")
+          .select("*")
+          .in("event_id", eventIds.map((id: any) => Number(id)));
+        if (error) {
+          console.error("Schedule error:", error);
+          throw error;
+        }
+        const counts: any = {};
+        eventIds.forEach((id: any) => { counts[id] = { yes: 0, no: 0, maybe: 0, total: 0 }; });
+        (rsvps || []).forEach((r: any) => {
+          if (counts[r.event_id]) {
+            const resp = r.response;
+            if (counts[r.event_id][resp] !== undefined) {
+              counts[r.event_id][resp] = (counts[r.event_id][resp] || 0) + 1;
+              counts[r.event_id].total += 1;
+            }
+          }
         });
-        rsvpsByEvent = await getRsvpsForEvents(eventIds).catch((e) => {
-          console.error("PAGE ERROR:", e);
-          console.error('[Schedule] getRsvpsForEvents failed:', e);
-          return {} as any;
-        });
+        rsvpCounts = counts;
+      } catch (e: any) {
+        console.error("Schedule error:", e);
+        rsvpCounts = {};
       }
-      rosterPlayers = await getRoster().catch((e) => {
-        console.error("PAGE ERROR:", e);
-        console.error('[Schedule] getRoster failed:', e);
-        return [] as any[];
-      });
-    } catch (dataErr: any) {
-      console.error("PAGE ERROR:", dataErr);
-      console.error('[Schedule] rsvp/roster data fetch failed:', dataErr);
-      rsvpCounts = {};
-      rsvpsByEvent = {};
+
+      // RSVPs by event - simple .select('*')
+      try {
+        const { data: rsvps, error } = await supabase
+          .from("rsvps")
+          .select("*")
+          .in("event_id", eventIds.map((id: any) => Number(id)))
+          .order("created_at", { ascending: true });
+        if (error) {
+          console.error("Schedule error:", error);
+          throw error;
+        }
+        const byEvent: any = {};
+        eventIds.forEach((id: any) => { byEvent[id] = []; });
+        (rsvps || []).forEach((r: any) => {
+          if (byEvent[r.event_id]) byEvent[r.event_id].push(r);
+        });
+        rsvpsByEvent = byEvent;
+      } catch (e: any) {
+        console.error("Schedule error:", e);
+        rsvpsByEvent = {};
+      }
+    }
+
+    // Roster - simple .select('*')
+    try {
+      const { data: players, error: pErr } = await supabase
+        .from("players")
+        .select("*")
+        .eq("is_active", true)
+        .order("last_name", { ascending: true });
+      if (pErr) {
+        console.error("Schedule error:", pErr);
+        throw pErr;
+      }
+      const playerList = players || [];
+      // minimal families
+      const famIds = [...new Set(playerList.map((p: any) => p.family_id).filter(Boolean))];
+      let famMap: any = {};
+      if (famIds.length) {
+        const { data: fams } = await supabase.from("families").select("*").in("id", famIds);
+        (fams || []).forEach((f: any) => famMap[f.id] = f);
+      }
+      rosterPlayers = playerList.map((p: any) => ({
+        ...p,
+        family: famMap[p.family_id] || { id: p.family_id, name: 'Unassigned' }
+      }));
+    } catch (e: any) {
+      console.error("Schedule error:", e);
       rosterPlayers = [];
     }
+
   } catch (pageErr: any) {
-    console.error("PAGE ERROR:", pageErr);
-    console.error('[Schedule] page fatal error:', pageErr);
+    console.error("Schedule error:", pageErr);
     hasError = true;
     errorMsg = 'Something went wrong loading the schedule.';
     events = [];
