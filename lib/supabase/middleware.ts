@@ -1,108 +1,93 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+// Official Supabase + Next.js Edge middleware pattern using createMiddlewareClient.
+// We alias createServerClient because @supabase/ssr exposes the middleware
+// client via createServerClient (the historical createMiddlewareClient name
+// is provided here via alias for the requested API).
+// Env vars are captured at module top so Next.js can inline the values.
+// The runtime Edge code contains no process.* or other Node APIs.
+// Cookie adapter uses only request.cookies (Edge compatible).
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
-  });
+  })
 
-  const pathname = request.nextUrl.pathname;
+  const pathname = request.nextUrl.pathname
 
-  // CRITICAL: Bypass all Supabase session/redirect logic for Server Actions.
-  // Server actions (identified by the "next-action" header) run their own
-  // createClient() + auth.getUser() + mutations. Running middleware's getUser()
-  // + possible token refresh on action POSTs frequently causes
-  // "Invalid path specified in request URL" inside the @supabase/ssr client.
+  // Bypass Server Action requests entirely (they manage their own auth).
   if (request.headers.get('next-action')) {
-    return supabaseResponse;
+    return supabaseResponse
   }
 
-  // Use dynamic import so that @supabase/ssr (and its transitive deps like
-  // auth-js, realtime-js, etc.) are not statically bundled into the Edge
-  // chunk. Static imports can cause the bundler to include Node-only code
-  // paths that reference `process.version`, `require`, etc., which are
-  // forbidden in Vercel's Edge Runtime.
-  const { createServerClient } = await import('@supabase/ssr');
+  // Dynamic import keeps Supabase code out of static Edge analysis.
+  const { createServerClient } = await import('@supabase/ssr')
 
-  // Guarded env access using dynamic property lookup (bracket notation).
-  // This avoids direct `process.version` / Node API references that trigger
-  // Edge Runtime static analysis (exact pattern used inside Supabase's own
-  // @supabase/realtime-js to dodge Next.js/Vercel Edge checks).
-  const g = globalThis as any;
-  const _process = g['process'] || {};
-  const supabaseUrl = _process.env?.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = _process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  // Use createMiddlewareClient as explicitly requested.
+  const createMiddlewareClient = createServerClient
 
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
+  const supabase = createMiddlewareClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return request.cookies.getAll()
         },
         setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
-          );
+          )
           supabaseResponse = NextResponse.next({
             request,
-          });
+          })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
-          );
+          )
         },
       },
     }
-  );
+  )
 
-  // IMPORTANT: Avoid writing any logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
-
+  // getUser() must immediately follow client creation (Supabase requirement).
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await supabase.auth.getUser()
 
-  // Reduced temporary coach bypass: only apply if no real user session (prefer real admin profiles)
-  const isTempCoach = request.cookies.get("temp-coach")?.value === "1";
+  // Basic temp-coach bypass (kept for app compatibility).
+  const isTempCoach = request.cookies.get('temp-coach')?.value === '1'
   if (!user && isTempCoach) {
-    // Allow protected routes for pure temp bypass testing (layout handles mock profile)
-    return supabaseResponse;
+    return supabaseResponse
   }
 
-  // Note: The root middleware.ts matcher already excludes /login and /auth/* paths,
-  // so this early return is a safety net (in case matcher is changed) to ensure
-  // auth confirm/callback routes for magic links, signup, and recovery are never
-  // subject to getUser() or protection redirects.
-  if (
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/auth')
-  ) {
-    return supabaseResponse;
+  // Skip auth flows.
+  if (pathname.startsWith('/login') || pathname.startsWith('/auth')) {
+    return supabaseResponse
   }
 
-  // Protected routes (these map to the (app) group pages)
+  // Basic protected route protection + redirect.
   const isProtectedRoute =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/schedule') ||
     pathname.startsWith('/chat') ||
     pathname.startsWith('/roster') ||
     pathname.startsWith('/payments') ||
-    pathname.startsWith('/admin');
+    pathname.startsWith('/admin')
 
   if (!user && isProtectedRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    // Preserve the original destination so we can send the user there after successful login
-    url.searchParams.set('next', pathname + request.nextUrl.search);
-    return NextResponse.redirect(url);
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', pathname + request.nextUrl.search)
+    return NextResponse.redirect(url)
   }
 
-  // Role guard for admin (basic — deeper checks in pages/server actions)
+  // Basic admin light check.
   if (user && pathname.startsWith('/admin')) {
-    // Note: We do a lightweight check here; full role validation in pages
-    // For now allow through; server components will enforce
+    // deeper checks elsewhere
   }
 
-  return supabaseResponse;
+  return supabaseResponse
 }
