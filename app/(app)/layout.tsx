@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { BottomNav } from "@/components/layout/BottomNav";
 import type { Profile } from "@/lib/supabase/types";
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({

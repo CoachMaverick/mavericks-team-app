@@ -33,11 +33,14 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    const supabase = createClient();
     const expectedEmail = "coach@comavericksbaseball.com";
     const isDemoEmail = email.trim().toLowerCase() === expectedEmail;
 
+    let navigated = false;
+
     try {
+      const supabase = createClient();
+
       // Prioritize real Supabase auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
@@ -45,7 +48,6 @@ export default function LoginPage() {
       });
 
       if (error) {
-        // If not demo email, fail
         if (!isDemoEmail) {
           throw error;
         }
@@ -68,15 +70,20 @@ export default function LoginPage() {
 
         toast.success(isAdmin ? "✅ Logged in as Admin" : "Logged in");
         router.push("/dashboard");
+        router.refresh(); // Ensure server components (e.g. layout auth check) see the new session cookies
+        navigated = true;
         return;
       }
     } catch (err: any) {
       if (!isDemoEmail) {
         toast.error(err.message || "Login failed");
-        setLoading(false);
         return;
       }
       // fallthrough to demo for expected email
+    } finally {
+      if (!navigated) {
+        setLoading(false);
+      }
     }
 
     // Fallback for demo email (demo accounts only)
@@ -85,11 +92,11 @@ export default function LoginPage() {
       await new Promise((r) => setTimeout(r, 300));
       toast.success("Logged in (demo mode)");
       router.push("/dashboard");
+      router.refresh();
       return;
     }
 
     toast.error("Login failed");
-    setLoading(false);
   };
 
   return (
