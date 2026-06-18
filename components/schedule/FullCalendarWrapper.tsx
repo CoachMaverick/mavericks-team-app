@@ -423,25 +423,34 @@ export function FullCalendarWrapper({
       const origin = (typeof window !== "undefined" ? window.location.origin : "");
       const url = `${origin}/api/calendar/ics`;
 
-      // Copy link for subscription (works in Apple Calendar, Google, Outlook etc.)
+      // Copy link for subscription (paste into Apple Calendar, Google Calendar, Outlook etc. as "Subscribe")
       if (navigator?.clipboard?.writeText) {
         navigator.clipboard.writeText(url)
           .then(() => {
-            toast.success("Subscription link copied! Add it in your calendar app to stay up to date.");
+            toast.success("Calendar subscription URL copied! Add as subscription in your calendar app.");
           })
           .catch(() => {
-            // Fallback for older browsers
-            prompt("Copy this link to subscribe to Mavericks calendar:", url);
+            prompt("Copy this subscription URL:", url);
           });
       } else {
-        prompt("Copy this link to subscribe to Mavericks calendar:", url);
+        prompt("Copy this subscription URL:", url);
       }
 
-      // Also open the feed (triggers download in many clients / browsers)
-      window.open(url, "_blank");
+      // Force download of the .ics (also works for direct add to calendar)
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "mavericks-12u-schedule.ics";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (e: any) {
       console.error("Schedule error (subscribe calendar):", e);
       toast.error("Could not prepare calendar subscription");
+      // last resort - try direct open
+      try {
+        const origin = (typeof window !== "undefined" ? window.location.origin : "");
+        window.open(`${origin}/api/calendar/ics`, "_blank");
+      } catch {}
     }
   };
 
