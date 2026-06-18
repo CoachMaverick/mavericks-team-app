@@ -321,9 +321,11 @@ export async function getRsvpCountsForEvents(eventIds: (number | string)[]): Pro
     rsvps.forEach((r: any) => {
       if (counts[r.event_id]) {
         const resp = r.response;
-        if (counts[r.event_id][resp] !== undefined) {
+        if (resp === 'yes' || resp === 'no') {
           counts[r.event_id][resp] = (counts[r.event_id][resp] || 0) + 1;
           counts[r.event_id].total += 1;
+        } else if (resp === 'maybe') {
+          counts[r.event_id].maybe = (counts[r.event_id].maybe || 0) + 1;
         }
       }
     });

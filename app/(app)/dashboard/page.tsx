@@ -89,7 +89,7 @@ export default async function DashboardPage() {
           ? Math.max(0, totalPlayers - yesCount - noCount)
           : 0;
         const rsvpSummary = totalPlayers > 0
-          ? `Yes: ${yesCount} | Not Responded: ${notResponded}`
+          ? `Yes: ${yesCount} | No: ${noCount} | Not Responded: ${notResponded}`
           : (yesCount > 0 || noCount > 0 ? `Yes: ${yesCount} | No: ${noCount}` : 'No RSVPs yet');
         return {
           id: ev.id,

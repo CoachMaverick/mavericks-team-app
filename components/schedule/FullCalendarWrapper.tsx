@@ -175,13 +175,18 @@ export function FullCalendarWrapper({
       const list = Array.isArray(rsvps) ? rsvps : [];
       setRsvpsByEventState((prev) => ({ ...prev, [eventId]: list }));
 
-      // Recompute counts for this event only
+      // Recompute counts for this event only (clean logic: only yes/no count as responded for totals; maybe legacy treated as not responded)
       const counts: { yes: number; no: number; maybe: number; total: number } = { yes: 0, no: 0, maybe: 0, total: 0 };
       list.forEach((r: any) => {
-        const resp = r?.response as 'yes' | 'no' | 'maybe' | undefined;
-        if (resp === 'yes' || resp === 'no' || resp === 'maybe') {
-          counts[resp] = (counts[resp] || 0) + 1;
+        const resp = r?.response;
+        if (resp === 'yes') {
+          counts.yes = (counts.yes || 0) + 1;
           counts.total += 1;
+        } else if (resp === 'no') {
+          counts.no = (counts.no || 0) + 1;
+          counts.total += 1;
+        } else if (resp === 'maybe') {
+          counts.maybe = (counts.maybe || 0) + 1;
         }
       });
       setRsvpCounts((prev) => ({ ...prev, [eventId]: counts }));
@@ -374,7 +379,7 @@ export function FullCalendarWrapper({
     }
   };
 
-  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no' | 'maybe') => {
+  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no') => {
     const supabase = createClient();
     try {
       const fam = familyName || 'Demo Family';
@@ -475,10 +480,9 @@ export function FullCalendarWrapper({
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-semibold text-sm tracking-tight">Attendance / RSVP</div>
                   {rsvpCounts[selectedEvent.id] && (
-                    <div className="flex gap-1 text-[10px] font-medium">
-                      <span className="px-1.5 py-0.5 rounded bg-green-600 text-white">{rsvpCounts[selectedEvent.id].yes} Yes</span>
-                      <span className="px-1.5 py-0.5 rounded bg-yellow-500 text-white">{rsvpCounts[selectedEvent.id].maybe} Maybe</span>
-                      <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">{rsvpCounts[selectedEvent.id].no} No</span>
+                    <div className="flex gap-2 text-[10px] font-medium">
+                      <span className="px-1.5 py-0.5 rounded bg-green-600 text-white">{rsvpCounts[selectedEvent.id].yes || 0} Yes</span>
+                      <span className="px-1.5 py-0.5 rounded bg-red-600 text-white">{rsvpCounts[selectedEvent.id].no || 0} No</span>
                     </div>
                   )}
                 </div>
@@ -491,11 +495,12 @@ export function FullCalendarWrapper({
                       {rsvpsByEventState[selectedEvent.id].map((r: any, idx: number) => {
                         const players = playersByFamily[r.family_name] || [];
                         const display = players.length > 0 ? `${r.family_name} (${players.join(', ')})` : r.family_name;
-                        const badgeClass = r.response === 'yes' ? 'bg-green-100 text-green-700' : r.response === 'no' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700';
+                        const resp = r.response;
+                        const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                         return (
                           <li key={idx} className="flex justify-between items-center">
                             <span className="truncate">{display}</span>
-                            <span className={`px-1.5 py-0 rounded text-[10px] font-medium ${badgeClass}`}>{r.response}</span>
+                            <span className={`px-1.5 py-0 rounded text-[10px] font-medium ${badgeClass}`}>{resp}</span>
                           </li>
                         );
                       })}
@@ -506,20 +511,13 @@ export function FullCalendarWrapper({
                 )}
 
                 {/* Prominent RSVP buttons */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Button 
                     size="sm" 
                     onClick={() => handleRsvp(selectedEvent.id, 'Demo Family', 'yes')} 
                     className="bg-green-600 hover:bg-green-700 text-white text-xs py-1"
                   >
                     👍 Yes
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    onClick={() => handleRsvp(selectedEvent.id, 'Demo Family', 'maybe')} 
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs py-1"
-                  >
-                    🤔 Maybe
                   </Button>
                   <Button 
                     size="sm" 
