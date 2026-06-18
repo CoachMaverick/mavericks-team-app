@@ -39,60 +39,106 @@ export default function ChatPage() {
     setLoading(true);
     setLoadError(null);
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser().catch(() => ({ data: { user: null } } as any));
-      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
-      const uid = user?.id || (isTemp ? 'temp-coach-id' : '');
-      setCurrentUserId(uid);
-      setIsCoach(isTemp || !!user?.email?.includes('coach'));
+    let uid = '';
+    let coach = false;
 
-      // MINIMAL SAFE queries
-      const { data: msgs } = await supabase
+    // 1. Auth - separate try/catch
+    try {
+      const { data: { user } } = await supabase.auth.getUser().catch((e: any) => {
+        console.error('[Chat] auth.getUser error:', e);
+        return { data: { user: null } };
+      });
+      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+      uid = user?.id || (isTemp ? 'temp-coach-id' : '');
+      coach = isTemp || !!user?.email?.includes('coach');
+      setCurrentUserId(uid);
+      setIsCoach(coach);
+    } catch (authErr: any) {
+      console.error('[Chat] auth block error:', authErr);
+      uid = 'temp-coach-id';
+      coach = true;
+      setCurrentUserId(uid);
+      setIsCoach(true);
+    }
+
+    // 2. Messages - separate try/catch , basic SELECT only
+    try {
+      const { data: msgs, error: msgErr } = await supabase
         .from('messages')
         .select('id, created_at, sender_id, content, is_pinned')
         .eq('channel_type', 'team')
         .order('created_at', { ascending: true })
         .limit(100);
 
+      if (msgErr) {
+        console.error('[Chat] messages select error:', msgErr);
+        throw msgErr;
+      }
       setMessages((msgs || []).filter(Boolean) as SafeMessage[]);
+    } catch (msgErr: any) {
+      console.error('[Chat] messages load failed:', msgErr);
+      setMessages([]);
+      setLoadError('Failed to load messages.');
+    }
 
-      const { data: anns } = await supabase
+    // 3. Announcements - separate try/catch , basic SELECT
+    try {
+      const { data: anns, error: annErr } = await supabase
         .from('announcements')
         .select('id, title, body, created_at')
         .eq('is_pinned', true)
+        .order('created_at', { ascending: false })
         .limit(5);
 
+      if (annErr) {
+        console.error('[Chat] announcements select error:', annErr);
+        throw annErr;
+      }
       setPinned((anns || []) as SafeAnnouncement[]);
-    } catch (e: any) {
-      console.warn('[Chat] load failed safely:', e?.message);
-      setLoadError('Something went wrong loading chat data.');
-      setMessages([]);
+    } catch (annErr: any) {
+      console.error('[Chat] announcements load failed:', annErr);
       setPinned([]);
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const handleSend = async () => {
     const text = newMessage.trim();
-    if (!text) return;
+    if (!text || !currentUserId) return;
 
-    const temp: SafeMessage = { id: 'temp-' + Date.now(), created_at: new Date().toISOString(), content: text };
-    setMessages(p => [...p, temp]);
+    const tempId = 'temp-' + Date.now();
+    const temp: SafeMessage = {
+      id: tempId,
+      created_at: new Date().toISOString(),
+      content: text,
+      sender_id: currentUserId,
+    };
+    setMessages((prev) => [...prev, temp]);
     setNewMessage('');
 
+    // Insert with its own try/catch
     try {
-      await supabase.from('messages').insert({
+      const { error } = await supabase.from('messages').insert({
         channel_type: 'team',
         content: text,
         sender_id: currentUserId === 'temp-coach-id' ? null : currentUserId,
       } as any);
+
+      if (error) {
+        console.error('[Chat] send insert error:', error);
+        throw error;
+      }
+      // reload to get real rows
       await loadData();
-    } catch (e) {
+    } catch (sendErr: any) {
+      console.error('[Chat] send failed:', sendErr);
       toast.error('Failed to send message');
-      setMessages(p => p.filter(m => m.id !== temp.id));
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setNewMessage(text);
     }
   };
@@ -105,9 +151,17 @@ export default function ChatPage() {
     <ErrorBoundary>
       <div className="space-y-6">
         {loadError && (
-          <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
+          <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between items-center">
             <span>{loadError}</span>
-            <button onClick={loadData} className="text-sm underline">Try Again</button>
+            <button
+              onClick={() => {
+                setLoadError(null);
+                loadData();
+              }}
+              className="text-sm underline font-medium"
+            >
+              Try Again
+            </button>
           </div>
         )}
 
@@ -115,7 +169,7 @@ export default function ChatPage() {
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <MessageCircle className="h-7 w-7" /> Team Chat
           </h1>
-          <p className="text-muted-foreground">Simple team message list. Maximum resilience mode.</p>
+          <p className="text-muted-foreground">Ultra-safe basic message list.</p>
         </div>
 
         {pinned.length > 0 && (
@@ -124,7 +178,7 @@ export default function ChatPage() {
               <CardTitle className="text-sm">Pinned Announcements</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              {pinned.map(a => (
+              {pinned.map((a) => (
                 <div key={a.id} className="border-l-4 border-red-600 pl-3">
                   <div className="font-semibold">{a.title}</div>
                   <div className="text-muted-foreground text-xs">{a.body}</div>
@@ -139,24 +193,31 @@ export default function ChatPage() {
             <CardTitle>Messages</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 overflow-auto space-y-3 bg-muted/30 p-4">
-            {messages.length === 0 && <div className="text-center text-muted-foreground py-8">No messages yet.</div>}
-            {messages.map(m => (
+            {messages.length === 0 && (
+              <div className="text-center text-muted-foreground py-8">No messages yet.</div>
+            )}
+            {messages.map((m) => (
               <div key={m.id} className="p-3 rounded border bg-card">
                 <div className="text-[10px] text-muted-foreground mb-0.5">
                   {new Date(m.created_at).toLocaleTimeString()}
-                  {m.is_pinned && ' • 📌 pinned'}
+                  {m.is_pinned && ' • 📌'}
                 </div>
-                <div className="text-sm">{m.content}</div>
+                <div className="text-sm whitespace-pre-wrap">{m.content}</div>
               </div>
             ))}
           </CardContent>
 
           <div className="p-3 border-t flex gap-2 bg-card">
             <Input
-              placeholder="Type message and press Enter"
+              placeholder="Type a message..."
               value={newMessage}
-              onChange={e => setNewMessage(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               className="flex-1"
             />
             <Button onClick={handleSend} disabled={!newMessage.trim()}>
@@ -166,7 +227,7 @@ export default function ChatPage() {
         </Card>
 
         <div className="text-xs text-center text-muted-foreground">
-          Minimal safe mode • Loads even if other DB features are broken
+          Every query is wrapped. Empty DB or missing columns are handled.
         </div>
       </div>
     </ErrorBoundary>
