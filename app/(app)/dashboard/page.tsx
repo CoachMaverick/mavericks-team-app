@@ -70,6 +70,11 @@ export default async function DashboardPage() {
       safeInvoices.filter((i: any) => i.status === 'paid').map((i: any) => i.family_id).filter(Boolean)
     );
 
+    // Roster snapshot (compute early for Not Responded calc in Upcoming Events)
+    const safeRoster = Array.isArray(roster) ? roster.filter((p: any) => p && typeof p === 'object') : [];
+    totalPlayers = safeRoster.length;
+    activeFamilies = new Set(safeRoster.map((p: any) => p.family_id).filter(Boolean)).size;
+
     // Upcoming events (next 3-5)
     const safeUpcoming = Array.isArray(upcomingEventsRaw) ? upcomingEventsRaw.filter((ev: any) => ev && typeof ev === 'object') : [];
     upcomingEvents = safeUpcoming.map((ev: any) => {
@@ -78,9 +83,14 @@ export default async function DashboardPage() {
         const dateStr = isNaN(startDate.getTime()) ? 'TBD' : startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         const timeStr = isNaN(startDate.getTime()) ? '' : startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
         const counts = rsvpCountsForUpcoming[ev.id] || { yes: 0, no: 0, maybe: 0, total: 0 };
-        const rsvpSummary = counts.total > 0
-          ? `Yes: ${counts.yes} | Maybe: ${counts.maybe} | No: ${counts.no}`
-          : 'No RSVPs yet';
+        const yesCount = counts.yes || 0;
+        const noCount = counts.no || 0;
+        const notResponded = totalPlayers > 0
+          ? Math.max(0, totalPlayers - yesCount - noCount)
+          : 0;
+        const rsvpSummary = totalPlayers > 0
+          ? `Yes: ${yesCount} | Not Responded: ${notResponded}`
+          : (yesCount > 0 || noCount > 0 ? `Yes: ${yesCount} | No: ${noCount}` : 'No RSVPs yet');
         return {
           id: ev.id,
           title: ev.title || 'Event',
@@ -93,11 +103,6 @@ export default async function DashboardPage() {
         return null;
       }
     }).filter(Boolean);
-
-    // Roster snapshot
-    const safeRoster = Array.isArray(roster) ? roster.filter((p: any) => p && typeof p === 'object') : [];
-    totalPlayers = safeRoster.length;
-    activeFamilies = new Set(safeRoster.map((p: any) => p.family_id).filter(Boolean)).size;
 
     // Recent Activity: latest team chat messages (most recent first)
     const safeRecent = Array.isArray(recentMsgs) ? recentMsgs.filter((m: any) => m && typeof m === 'object') : [];
