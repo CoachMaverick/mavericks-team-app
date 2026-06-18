@@ -87,19 +87,30 @@ export function FullCalendarWrapper({
 
   // Convert DB events to FullCalendar format (simple, stable)
   // Use Date objects to ensure correct parsing and display on the right dates (avoids ISO string timezone pitfalls)
-  const calendarEvents = events
-    .filter((e) => e != null && e.id)
-    .map((event) => ({
-      id: String(event.id),
-      title: event.title || "Untitled",
-      start: new Date(event.start_time),
-      end: event.end_time ? new Date(event.end_time) : undefined,
-      allDay: !event.end_time,
-      backgroundColor: event.is_cancelled ? "#6b7280" : EVENT_TYPE_COLORS[event.type] || "#DC2626",
-      borderColor: event.is_cancelled ? "#6b7280" : "#B91C1C",
-      textColor: "#ffffff",
-      extendedProps: { ...event },
-    }));
+  // Extra defensive: guard bad/missing dates so calendar never crashes even with bad DB rows
+  const calendarEvents = (Array.isArray(events) ? events : [])
+    .filter((e: any) => e != null && e.id && e.start_time)
+    .map((event: any) => {
+      try {
+        const start = event.start_time ? new Date(event.start_time) : null;
+        const end = event.end_time ? new Date(event.end_time) : undefined;
+        if (!start || isNaN(start.getTime())) return null;
+        return {
+          id: String(event.id),
+          title: event.title || "Untitled",
+          start,
+          end: end && !isNaN(end.getTime()) ? end : undefined,
+          allDay: !event.end_time,
+          backgroundColor: event.is_cancelled ? "#6b7280" : EVENT_TYPE_COLORS[event.type] || "#DC2626",
+          borderColor: event.is_cancelled ? "#6b7280" : "#B91C1C",
+          textColor: "#ffffff",
+          extendedProps: { ...event },
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as any[];
 
   const resetForm = () => {
     setFormData({

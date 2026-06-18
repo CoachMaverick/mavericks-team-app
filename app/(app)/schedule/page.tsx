@@ -75,7 +75,11 @@ export default async function SchedulePage() {
 
     // Fetch events (via action for consistent temp-coach handling via service role)
     try {
-      events = await getEvents().catch(() => [] as Event[]);
+      const rawEvents = await getEvents().catch(() => [] as Event[]);
+      // Sanitize: only valid events with start_time to prevent downstream crashes (calendar, dates)
+      events = Array.isArray(rawEvents)
+        ? rawEvents.filter((e: any) => e && e.id && e.start_time)
+        : [];
     } catch {
       events = [];
     }

@@ -223,30 +223,35 @@ export async function deleteEvent(eventId: number | string) {
 // Fetch events (used by schedule and dashboard)
 export async function getEvents(options?: { upcomingOnly?: boolean; limit?: number }) {
   noStore();
-  const supabase = await getSupabaseForReadWrite();
+  try {
+    const supabase = await getSupabaseForReadWrite();
 
-  let query = supabase
-    .from("events")
-    .select("*")
-    .order("start_time", { ascending: true });
+    let query = supabase
+      .from("events")
+      .select("*")
+      .order("start_time", { ascending: true });
 
-  if (options?.upcomingOnly) {
-    const now = new Date().toISOString();
-    query = query.gte("start_time", now);
-  }
+    if (options?.upcomingOnly) {
+      const now = new Date().toISOString();
+      query = query.gte("start_time", now);
+    }
 
-  if (options?.limit) {
-    query = query.limit(options.limit);
-  }
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
 
-  const { data, error } = await query;
+    const { data, error } = await query;
 
-  if (error) {
-    console.warn("getEvents error (returning empty):", error.message);
+    if (error) {
+      console.warn("getEvents error (returning empty):", error.message);
+      return [];
+    }
+
+    return data || [];
+  } catch (e: any) {
+    console.warn('[getEvents] error (returning empty):', e?.message);
     return [];
   }
-
-  return data || [];
 }
 
 // Simple helper to get RSVP counts for a set of events (used for dashboard/schedule summaries)

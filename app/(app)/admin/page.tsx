@@ -176,7 +176,7 @@ export default function AdminPage() {
       {loadError && (
         <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
           <span>{loadError} Some admin features may be unavailable.</span>
-          <button onClick={() => window.location.reload()} className="text-sm underline">Try Again</button>
+          <button onClick={() => { setLoadError(null); router.refresh(); setDataVersion(v => v + 1); }} className="text-sm underline">Try Again</button>
         </div>
       )}
       <div>
@@ -806,19 +806,27 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
     }
   }
 
-  const filteredInvoices = invoices
-    .map((inv: any) => ({ inv, display: getInvoiceDisplay(inv) }))
-    .filter(({ inv, display }) => {
-      const matchesSearch = !search || 
-        (inv.description || '').toLowerCase().includes(search.toLowerCase()) ||
-        (inv.family?.name || '').toLowerCase().includes(search.toLowerCase()) ||
-        (inv.notes || '').toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || display.label === statusFilter;
-      const matchesType = typeFilter === 'all' || inv.due_type === typeFilter;
-      return matchesSearch && matchesStatus && matchesType;
-    })
-    .map(x => x.inv)
-    .sort((a: any, b: any) => (a.due_date || '').localeCompare(b.due_date || ''));
+  // Compute with full guards so render never throws even on bad invoice rows
+  let filteredInvoices: any[] = [];
+  try {
+    filteredInvoices = (Array.isArray(invoices) ? invoices : [])
+      .map((inv: any) => ({ inv: inv || {}, display: getInvoiceDisplay(inv) }))
+      .filter(({ inv, display }: any) => {
+        if (!inv) return false;
+        const matchesSearch = !search || 
+          (inv.description || '').toLowerCase().includes(search.toLowerCase()) ||
+          (inv.family?.name || '').toLowerCase().includes(search.toLowerCase()) ||
+          (inv.notes || '').toLowerCase().includes(search.toLowerCase());
+        const matchesStatus = statusFilter === 'all' || display.label === statusFilter;
+        const matchesType = typeFilter === 'all' || inv.due_type === typeFilter;
+        return matchesSearch && matchesStatus && matchesType;
+      })
+      .map((x: any) => x.inv)
+      .sort((a: any, b: any) => ((a && a.due_date) || '').localeCompare(((b && b.due_date) || '')));
+  } catch (e) {
+    console.warn('Admin filter computation error (safe empty):', e);
+    filteredInvoices = [];
+  }
 
   function getDueTypeBadge(dueType: string) {
     const map: Record<string, string> = {

@@ -161,12 +161,15 @@ export default function ChatPage() {
 
   const loadInitialData = async (uid: string) => {
     try {
-      const [mems, teamMsgs, pinnedMsgs] = await Promise.all([
-        getChatMembers(),
-        getMessages('team'),
-        getMessages('team', null, 1000, { pinnedOnly: true }),
+      const [memsRes, teamMsgsRes, pinnedMsgsRes] = await Promise.all([
+        getChatMembers().catch(() => [] as any),
+        getMessages('team').catch(() => [] as any),
+        getMessages('team', null, 1000, { pinnedOnly: true }).catch(() => [] as any),
       ]);
-      setMembers(mems.filter((m: Member) => m.id !== uid));
+      const mems = Array.isArray(memsRes) ? memsRes : [];
+      const teamMsgs = Array.isArray(teamMsgsRes) ? teamMsgsRes : [];
+      const pinnedMsgs = Array.isArray(pinnedMsgsRes) ? pinnedMsgsRes : [];
+      setMembers(mems.filter((m: Member) => m && m.id !== uid));
 
       // ALWAYS query the database *fresh* (via pinnedOnly) for is_pinned=true messages on load/mount.
       // No client-side cache, merge, or local is_pinned state for the Pinned section.
@@ -179,8 +182,8 @@ export default function ChatPage() {
       // Compute initial unread for DMs (simplified: fetch recent DMs)
       const dmMsgs = await getMessages('direct').catch(() => []);
       const unread: Record<string, number> = {};
-      (dmMsgs as MessageWithSender[]).forEach((msg) => {
-        if (!msg.read_by?.includes(uid)) {
+      (Array.isArray(dmMsgs) ? dmMsgs : []).forEach((msg: any) => {
+        if (msg && !msg.read_by?.includes(uid)) {
           const other = msg.sender_id === uid ? msg.recipient_id : msg.sender_id;
           if (other) unread[other] = (unread[other] || 0) + 1;
         }
@@ -638,21 +641,24 @@ export default function ChatPage() {
     try {
       if (activeView === 'team') {
         // Parallel queries for reliability: full list + dedicated pinnedOnly (ensures pinned stay after nav/refresh/pin)
-        const [data, pinnedData] = await Promise.all([
-          getMessages('team'),
-          getMessages('team', null, 1000, { pinnedOnly: true }),
+        const [dataRes, pinnedDataRes] = await Promise.all([
+          getMessages('team').catch(() => []),
+          getMessages('team', null, 1000, { pinnedOnly: true }).catch(() => []),
         ]);
+        const data = Array.isArray(dataRes) ? dataRes : [];
+        const pinnedData = Array.isArray(pinnedDataRes) ? pinnedDataRes : [];
         setPinnedMessagesList(pinnedData as MessageWithSender[]);
         setMessages(data as MessageWithSender[]);
         // Mark team messages as read (simple: all recent)
-        const ids = (data as any[]).filter(m => !m.read_by?.includes(currentUserId)).map(m => m.id);
-        if (ids.length) await markMessagesAsRead(ids);
+        const ids = data.filter((m: any) => m && !m.read_by?.includes(currentUserId)).map((m: any) => m.id);
+        if (ids.length) await markMessagesAsRead(ids).catch(() => {});
       } else if (selectedContact) {
-        const data = await getMessages('direct', selectedContact.id);
+        const dataRes = await getMessages('direct', selectedContact.id).catch(() => []);
+        const data = Array.isArray(dataRes) ? dataRes : [];
         setMessages(data as MessageWithSender[]);
         // Mark these as read
-        const ids = (data as any[]).filter(m => !m.read_by?.includes(currentUserId)).map(m => m.id);
-        if (ids.length) await markMessagesAsRead(ids);
+        const ids = data.filter((m: any) => m && !m.read_by?.includes(currentUserId)).map((m: any) => m.id);
+        if (ids.length) await markMessagesAsRead(ids).catch(() => {});
         // Clear unread for this contact
         setUnreadMap((prev) => {
           const copy = { ...prev };
@@ -937,13 +943,35 @@ export default function ChatPage() {
     );
   }
 
+  const handleRetry = () => {
+    setLoadError(null);
+    setLoading(true);
+    // Re-trigger loads
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser().catch(() => ({ data: { user: null } } as any));
+        const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+        const uid = user?.id || (isTemp ? 'temp-coach-id' : '');
+        setCurrentUserId(uid);
+        setIsCoach(isTemp || (user?.email?.includes('coach') ?? false));
+        if (uid) {
+          await loadInitialData(uid);
+        }
+      } catch (e) {
+        setLoadError('Something went wrong loading chat. Some features may be unavailable.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  };
+
   return (
     <ErrorBoundary>
     <div className="space-y-6">
       {loadError && (
         <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between items-center">
           <span>{loadError}</span>
-          <button onClick={() => { setLoadError(null); window.location.reload(); }} className="text-sm underline">Try Again</button>
+          <button onClick={handleRetry} className="text-sm underline">Try Again</button>
         </div>
       )}
       <div>
