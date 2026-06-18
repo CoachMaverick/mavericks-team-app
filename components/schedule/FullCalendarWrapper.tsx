@@ -14,8 +14,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { createEvent, updateEvent, deleteEvent, createRsvp } from "@/lib/actions";
+import { updateEvent, deleteEvent, createRsvp } from "@/lib/actions";
 import type { Event } from "@/lib/supabase/types";
+import { createClient } from '@/lib/supabase/client';
 
 interface FullCalendarWrapperProps {
   events: Event[];
@@ -148,15 +149,16 @@ export function FullCalendarWrapper({
     selectInfo.view.calendar.unselect();
   };
 
-  // Coach: Create
+  // Coach: Create - fully client-side with direct insert + try/catch
   const handleCreate = async () => {
     if (!formData.title || !formData.start) {
       toast.error("Title and start time are required");
       return;
     }
 
+    const supabase = createClient();
     try {
-      await createEvent({
+      const insertPayload = {
         title: formData.title,
         type: formData.type,
         start_time: new Date(formData.start).toISOString(),
@@ -164,14 +166,32 @@ export function FullCalendarWrapper({
         location: formData.location || null,
         opponent: formData.opponent || null,
         description: formData.description || null,
-      });
+        is_cancelled: false,
+      };
+
+      const { data: inserted, error } = await supabase
+        .from("events")
+        .insert(insertPayload as any)
+        .select("*")
+        .single();
+
+      if (error) {
+        console.error("Schedule error (createEvent):", error);
+        throw new Error(error.message || "Insert failed");
+      }
 
       toast.success("Event created");
       setShowAddDialog(false);
       resetForm();
 
-      router.refresh(); // re-sync server data (real id will come from DB)
+      // Optimistic add to local state for immediate UI
+      if (inserted) {
+        setEvents((prev) => [...prev, inserted as any]);
+      }
+
+      router.refresh(); // in case parent re-renders
     } catch (e: any) {
+      console.error("Schedule error:", e);
       toast.error(e.message || "Failed to create event");
     }
   };
