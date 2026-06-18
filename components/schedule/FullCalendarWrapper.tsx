@@ -158,25 +158,33 @@ export function FullCalendarWrapper({
 
     const supabase = createClient();
     try {
-      const insertPayload = {
+      // Use only columns that exist in the current events table.
+      // id is auto-generated, created_by/updated etc. omitted to avoid missing column errors.
+      // end_time is optional.
+      const insertPayload: any = {
         title: formData.title,
         type: formData.type,
         start_time: new Date(formData.start).toISOString(),
-        end_time: formData.end ? new Date(formData.end).toISOString() : null,
         location: formData.location || null,
-        opponent: formData.opponent || null,
         description: formData.description || null,
-        is_cancelled: false,
       };
+
+      if (formData.end) {
+        insertPayload.end_time = new Date(formData.end).toISOString();
+      }
+      if (formData.opponent) {
+        insertPayload.opponent = formData.opponent;
+      }
 
       const { data: inserted, error } = await supabase
         .from("events")
-        .insert(insertPayload as any)
+        .insert(insertPayload)
         .select("*")
         .single();
 
       if (error) {
-        console.error("Schedule error (createEvent):", error);
+        console.error("Schedule error (createEvent insert):", error);
+        console.error("Payload used:", insertPayload);
         throw new Error(error.message || "Insert failed");
       }
 
