@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Calendar, MessageCircle, CreditCard, Users } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { TeamBanner } from "@/components/TeamBanner";
-import { getTeamPaymentSummary, getEvents, getRoster, getMessages, getPinnedAnnouncements, getInvoices } from "@/lib/actions";
+import { getTeamPaymentSummary, getEvents, getRoster, getMessages, getPinnedAnnouncements, getInvoices, getRsvpCountsForEvents } from "@/lib/actions";
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +23,7 @@ export default async function DashboardPage() {
   let roster: any[] = [];
   let recentMsgs: any[] = [];
   let pinnedAnns: any[] = [];
+  let rsvpCountsForUpcoming: Record<number | string, { yes: number; no: number; maybe: number; total: number }> = {};
 
   try {
     summary = await getTeamPaymentSummary().catch(() => ({
@@ -36,6 +37,10 @@ export default async function DashboardPage() {
 
     allInvoices = await getInvoices().catch(() => [] as any[]);
     upcomingEventsRaw = await getEvents({ upcomingOnly: true, limit: 5 }).catch(() => [] as any[]);
+    const upcomingIds = Array.isArray(upcomingEventsRaw) ? upcomingEventsRaw.map((e: any) => e?.id).filter(Boolean) : [];
+    rsvpCountsForUpcoming = upcomingIds.length > 0
+      ? await getRsvpCountsForEvents(upcomingIds).catch(() => ({} as any))
+      : {};
     roster = await getRoster().catch(() => [] as any[]);
     recentMsgs = await getMessages('team', null, 8).catch(() => [] as any[]);
     pinnedAnns = await getPinnedAnnouncements().catch(() => [] as any[]);
@@ -72,12 +77,17 @@ export default async function DashboardPage() {
         const startDate = new Date(ev.start_time || 0);
         const dateStr = isNaN(startDate.getTime()) ? 'TBD' : startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         const timeStr = isNaN(startDate.getTime()) ? '' : startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const counts = rsvpCountsForUpcoming[ev.id] || { yes: 0, no: 0, maybe: 0, total: 0 };
+        const rsvpSummary = counts.total > 0
+          ? `Yes: ${counts.yes} | Maybe: ${counts.maybe} | No: ${counts.no}`
+          : 'No RSVPs yet';
         return {
           id: ev.id,
           title: ev.title || 'Event',
           date: dateStr,
           time: timeStr,
           location: ev.location || 'TBD',
+          rsvpSummary,
         };
       } catch {
         return null;
@@ -165,6 +175,9 @@ export default async function DashboardPage() {
                         <div className="font-medium leading-tight">{ev.title}</div>
                         <div className="text-xs text-muted-foreground mt-0.5">
                           {ev.date} • {ev.time} • {ev.location}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          {ev.rsvpSummary}
                         </div>
                       </div>
                     </div>
