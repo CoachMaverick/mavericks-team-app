@@ -8,54 +8,67 @@ import type { Event, Profile } from "@/lib/supabase/types";
 export const dynamic = 'force-dynamic';
 
 export default async function SchedulePage() {
-  const supabase = await createClient();
-
-  const cookieStore = await cookies();
-  const isTempCoach = cookieStore.get("temp-coach")?.value === "1";
-
   let user: any = null;
   let profile: Profile | null = null;
+  let isTempCoach = false;
 
-  if (isTempCoach) {
-    // Temporary hardcoded coach bypass (matches layout and other pages)
-    user = {
-      id: "temp-coach-id",
-      email: "coach@comavericksbaseball.com",
-    };
-    profile = {
-      id: "temp-coach-id",
-      role: "coach" as const,
-      first_name: "Coach",
-      last_name: "Maverick",
-      phone: null,
-      avatar_url: null,
-      family_id: null,
-      last_active_at: null,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    } as Profile;
-  } else {
-    const {
-      data: { user: realUser },
-    } = await supabase.auth.getUser();
+  try {
+    const cookieStore = await cookies();
+    isTempCoach = cookieStore.get("temp-coach")?.value === "1";
 
-    if (!realUser) {
-      return (
-        <div className="p-6 text-center text-muted-foreground">
-          Not authenticated. Please log in to view the schedule.
-        </div>
-      );
+    const supabase = await createClient();
+
+    if (isTempCoach) {
+      // Temporary hardcoded coach bypass (matches layout and other pages)
+      user = {
+        id: "temp-coach-id",
+        email: "coach@comavericksbaseball.com",
+      };
+      profile = {
+        id: "temp-coach-id",
+        role: "coach" as const,
+        first_name: "Coach",
+        last_name: "Maverick",
+        phone: null,
+        avatar_url: null,
+        family_id: null,
+        last_active_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: null,
+      } as Profile;
+    } else {
+      const {
+        data: { user: realUser },
+      } = await supabase.auth.getUser();
+
+      if (!realUser) {
+        return (
+          <div className="p-6 text-center text-muted-foreground">
+            Not authenticated. Please log in to view the schedule.
+          </div>
+        );
+      }
+
+      user = realUser;
+
+      try {
+        const { data: realProfile } = await supabase
+          .from("profiles")
+          .select("role, family_id, is_admin")
+          .eq("id", realUser.id)
+          .single<Profile>();
+        profile = realProfile;
+      } catch (profileErr) {
+        console.warn('Schedule profile fetch error (missing columns?):', profileErr);
+        profile = null;
+      }
     }
-
-    user = realUser;
-
-    const { data: realProfile } = await supabase
-      .from("profiles")
-      .select("role, family_id")
-      .eq("id", realUser.id)
-      .single<Profile>();
-
-    profile = realProfile;
+  } catch (e: any) {
+    console.warn('Schedule auth/setup error (falling back gracefully):', e?.message);
+    // fallback to no-auth view
+    isTempCoach = false;
+    user = null;
+    profile = null;
   }
 
   const isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;

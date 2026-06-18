@@ -69,14 +69,19 @@ export default function RosterPage() {
       setPlayers(data as RosterPlayer[]);
     } catch (e) {
       console.warn('Roster load error (using fallback demo):', e);
-      const fallback = await getRoster();
-      let data = fallback as RosterPlayer[];
-      if (isTemp && typeof window !== 'undefined') {
-        const saved = localStorage.getItem('mavericks-temp-roster');
-        if (saved) data = JSON.parse(saved);
-        else localStorage.setItem('mavericks-temp-roster', JSON.stringify(data));
+      try {
+        const fallback = await getRoster();
+        let data = fallback as RosterPlayer[];
+        if (isTemp && typeof window !== 'undefined') {
+          const saved = localStorage.getItem('mavericks-temp-roster');
+          if (saved) data = JSON.parse(saved);
+          else localStorage.setItem('mavericks-temp-roster', JSON.stringify(data));
+        }
+        setPlayers(data);
+      } catch (e2) {
+        console.warn('Roster fallback also failed, using empty:', e2);
+        setPlayers([]);
       }
-      setPlayers(data);
     }
     setLoading(false);
   };

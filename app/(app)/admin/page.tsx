@@ -431,7 +431,7 @@ function CreateInvoiceForm({ onSuccess, onAddForDemo, open }: { onSuccess: () =>
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    getFamilies().then(setFamilies);
+    getFamilies().then(setFamilies).catch(() => setFamilies([]));
   }, []);
 
   const resetForm = () => {

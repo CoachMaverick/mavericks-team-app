@@ -123,20 +123,25 @@ export default function ChatPage() {
   // Get current user and role (support temp coach)
   useEffect(() => {
     const loadUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
-      const uid = user?.id || (isTemp ? 'temp-coach-id' : '');
-      setCurrentUserId(uid);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+        const uid = user?.id || (isTemp ? 'temp-coach-id' : '');
+        setCurrentUserId(uid);
 
-      // Simple role check for demo
-      setIsCoach(isTemp || user?.email?.includes('coach') || false); // extend as needed
+        // Simple role check for demo
+        setIsCoach(isTemp || user?.email?.includes('coach') || false); // extend as needed
 
-      // Aggressive freshness: router.refresh + fresh DB query for is_pinned=true on EVERY mount.
-      router.refresh();
-      if (uid) {
-        await loadInitialData(uid);
+        // Aggressive freshness: router.refresh + fresh DB query for is_pinned=true on EVERY mount.
+        router.refresh();
+        if (uid) {
+          await loadInitialData(uid);
+        }
+      } catch (e) {
+        console.warn('Chat user load error:', e);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     loadUser();
   }, []); // empty deps: force on every mount/remount of Chat page (nav away+back, hard refresh)
