@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { MessageCircle, Send, Paperclip, Smile, Edit2, Trash2, Pin, X } from 'lucide-react';
-import { editMessage, deleteMessage, pinMessage, toggleMessageReaction } from '@/lib/actions';
+import { editMessage, deleteMessage, pinMessage, toggleMessageReaction, sendMessage } from '@/lib/actions';
 
 interface SafeMessage {
   id: string;
@@ -238,8 +238,8 @@ export default function ChatPage() {
       const sender_id = isTemp ? null : currentUserId;
       const payload: any = {
         content: sentText || '',
-        sender_id,  // user_id from session (schema uses sender_id for messages)
-        channel_type: 'team',  // channel = 'team'
+        sender_id,  // user_id from session
+        channel_type: 'team',
         recipient_id: null,
         created_at: new Date().toISOString(),
         reactions: {},
@@ -251,25 +251,27 @@ export default function ChatPage() {
         payload.media_type = mediaType || 'image/png';
       }
 
-      console.log('[Chat] performing direct Supabase insert to messages table', { payload, isTemp });
-
-      const { error } = await supabase.from('messages').insert(payload);
-
-      if (error) {
-        console.error('[Chat] Supabase .insert() FAILED for messages:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-          payload,
-        });
-        throw error;
+      if (isTemp) {
+        console.log('[Chat] temp: calling sendMessage action for insert');
+        await sendMessage(sentText || '', 'team', null, mediaUrl || null, mediaType || null);
+      } else {
+        console.log('[Chat] performing direct Supabase .insert() to messages', { payload, currentUserId });
+        const { error } = await supabase.from('messages').insert(payload);
+        if (error) {
+          console.error('[Chat] Supabase .insert() FAILED for messages:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            payload,
+          });
+          throw error;
+        }
       }
 
-      console.log('[Chat] direct insert SUCCESS');
+      console.log('[Chat] send SUCCESS');
       toast.success('Message sent');
 
-      // Reload to get real data + trigger any listeners; realtime should also fire
       await loadData();
       setTimeout(() => scrollToBottom(true), 100);
     } catch (sendErr: any) {
@@ -359,14 +361,16 @@ export default function ChatPage() {
     console.log('[Chat] saveEdit', { id: editingId, trimmed });
     try {
       const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      console.log('[Chat] saveEdit called', { editingId, trimmed, isTemp, currentUserId, isCoach });
       if (isTemp) {
         await editMessage(editingId, trimmed);
       } else {
-        console.log('[Chat] performing direct Supabase .update() for edit', { id: editingId, trimmed });
+        console.log('[Chat] performing direct Supabase .update() for edit', { id: editingId, trimmed, userCheck: currentUserId });
         const { error } = await (supabase as any)
           .from('messages')
           .update({ content: trimmed, updated_at: new Date().toISOString() })
-          .filter('id::text', 'eq', editingId);
+          .filter('id::text', 'eq', editingId)
+          .eq('sender_id', currentUserId);  // user_id check for own messages
         if (error) {
           console.error('[Chat] Supabase .update() FAILED for edit messages:', {
             message: error.message,
@@ -375,6 +379,7 @@ export default function ChatPage() {
             hint: error.hint,
             id: editingId,
             trimmed,
+            user_id: currentUserId,
           });
           throw error;
         }
@@ -396,14 +401,20 @@ export default function ChatPage() {
     console.log('[Chat] handleDelete', { id, isOwn, isCoach });
     try {
       const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      console.log('[Chat] handleDelete called', { id, isOwn, isTemp, currentUserId, isCoach });
       if (isTemp) {
         await deleteMessage(id);
       } else {
-        console.log('[Chat] performing direct Supabase .delete() for message', { id });
-        const { error } = await (supabase as any)
+        console.log('[Chat] performing direct Supabase .delete() for message', { id, userCheck: currentUserId });
+        // For own: filter by id + sender, for admin/coach: just id (RLS will allow)
+        let query = (supabase as any)
           .from('messages')
           .delete()
           .filter('id::text', 'eq', id);
+        if (isOwn) {
+          query = query.eq('sender_id', currentUserId);  // user_id check for own
+        }
+        const { error } = await query;
         if (error) {
           console.error('[Chat] Supabase .delete() FAILED for messages:', {
             message: error.message,
@@ -411,6 +422,8 @@ export default function ChatPage() {
             details: error.details,
             hint: error.hint,
             id,
+            isOwn,
+            user_id: currentUserId,
           });
           throw error;
         }
