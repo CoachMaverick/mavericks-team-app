@@ -16,6 +16,8 @@ export default async function SchedulePage() {
   let rsvpsByEvent: any = {};
   let rosterPlayers: any[] = [];
   let upcoming: any[] = [];
+  let isCoach = false;
+  let hasError = false;
 
   try {
     const cookieStore = await cookies();
@@ -69,7 +71,7 @@ export default async function SchedulePage() {
       }
     }
 
-    const isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
+    isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
 
     // Fetch events (via action for consistent temp-coach handling via service role)
     events = await getEvents().catch(() => [] as Event[]);
@@ -79,21 +81,29 @@ export default async function SchedulePage() {
     rsvpsByEvent = eventIds.length > 0 ? await getRsvpsForEvents(eventIds).catch(() => ({} as any)) : {};
     rosterPlayers = await getRoster().catch(() => [] as any[]);
 
-    // Simple upcoming list (sorted, limited)
+    // Simple upcoming list (sorted, limited) - with safe guards
     upcoming = [...events]
-      .filter(e => !e.is_cancelled)
-      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-      .slice(0, 10);
+      .filter(e => e && !e.is_cancelled && e.start_time)
+      .sort((a, b) => {
+        try { return new Date(a.start_time).getTime() - new Date(b.start_time).getTime(); } catch { return 0; }
+      })
+      .slice(0, 10)
+      .map(ev => ({ ...ev }));  // ensure objects
 
   } catch (e: any) {
     console.warn('Schedule page error (falling back gracefully):', e?.message);
     // All vars default to safe empty values defined above
+    isCoach = false;
+    hasError = true;
   }
-
-  const isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
 
   return (
     <div className="space-y-6">
+      {hasError && (
+        <div className="p-4 border border-yellow-500 bg-yellow-50 text-yellow-800 rounded text-sm">
+          Something went wrong loading schedule data. Some features may be unavailable. <button onClick={() => window.location.reload()} className="underline">Try Again</button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Schedule &amp; Calendar</h1>

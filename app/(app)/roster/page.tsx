@@ -34,6 +34,7 @@ interface RosterPlayer {
 export default function RosterPage() {
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isCoach, setIsCoach] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,6 +71,7 @@ export default function RosterPage() {
       setPlayers(data as RosterPlayer[]);
     } catch (e) {
       console.warn('Roster load error (using fallback demo):', e);
+      setLoadError('Failed to load roster data.');
       try {
         const fallback = await getRoster();
         let data = fallback as RosterPlayer[];
@@ -276,6 +278,12 @@ export default function RosterPage() {
   return (
     <ErrorBoundary>
     <div className="space-y-6">
+      {loadError && (
+        <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
+          <span>{loadError} Some data may be missing.</span>
+          <button onClick={() => window.location.reload()} className="text-sm underline">Try Again</button>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">

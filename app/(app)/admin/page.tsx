@@ -77,6 +77,7 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Mutable session state for temp demo.
   // Starts empty (no hardcoded demos). Admin Create + bulk populate only via user action; LS persists across nav.
@@ -160,6 +161,12 @@ export default function AdminPage() {
   return (
     <ErrorBoundary>
     <div className="space-y-6">
+      {loadError && (
+        <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
+          <span>{loadError} Some admin features limited.</span>
+          <button onClick={() => window.location.reload()} className="text-sm underline">Try Again</button>
+        </div>
+      )}
       <div>
         <h1 className="text-3xl font-bold tracking-tight mb-2">Admin Panel</h1>
         <p className="text-muted-foreground mb-6">
@@ -434,7 +441,9 @@ function CreateInvoiceForm({ onSuccess, onAddForDemo, open }: { onSuccess: () =>
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    getFamilies().then(setFamilies).catch(() => setFamilies([]));
+    getFamilies().then(setFamilies).catch(() => {
+      setFamilies([]);
+    });
   }, []);
 
   const resetForm = () => {

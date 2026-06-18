@@ -27,6 +27,7 @@ interface Notification {
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -35,6 +36,7 @@ export default function NotificationsPage() {
       setNotifications(data as Notification[]);
     } catch (e) {
       console.warn('Failed to load notifications', e);
+      setLoadError('Failed to load notifications.');
       setNotifications([]);
     }
     setLoading(false);
@@ -68,6 +70,12 @@ export default function NotificationsPage() {
   return (
     <ErrorBoundary>
     <div className="max-w-3xl mx-auto space-y-6">
+      {loadError && (
+        <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
+          <span>{loadError} Using empty list.</span>
+          <button onClick={() => window.location.reload()} className="text-sm underline">Try Again</button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">

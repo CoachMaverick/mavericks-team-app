@@ -78,6 +78,7 @@ export default function ChatPage() {
   const [announceTitle, setAnnounceTitle] = useState('');
   const [announceBody, setAnnounceBody] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Message search
   const [searchTerm, setSearchTerm] = useState('');
@@ -140,6 +141,7 @@ export default function ChatPage() {
         }
       } catch (e) {
         console.warn('Chat user load error:', e);
+        setLoadError('Failed to load user data. Some features may be limited.');
       } finally {
         setLoading(false);
       }
@@ -188,6 +190,7 @@ export default function ChatPage() {
       setUnreadMap(unread);
     } catch (e) {
       console.warn('Chat initial load error (demo may be used):', e);
+      setLoadError('Failed to load chat data. Using demo fallback.');
       // fallback
       setPinned([
         { id: 1, title: 'Season Kickoff!', body: 'First practice this Saturday. Bring water!', is_pinned: true, created_at: new Date().toISOString(), creator: { first_name: 'Coach', last_name: 'Maverick' } },
@@ -928,6 +931,12 @@ export default function ChatPage() {
   return (
     <ErrorBoundary>
     <div className="space-y-6">
+      {loadError && (
+        <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between items-center">
+          <span>{loadError}</span>
+          <button onClick={() => { setLoadError(null); window.location.reload(); }} className="text-sm underline">Try Again</button>
+        </div>
+      )}
       <div>
         <h1 className="text-3xl font-bold tracking-tight mb-2 flex items-center gap-2">
           <MessageCircle className="h-7 w-7" /> Team Chat
