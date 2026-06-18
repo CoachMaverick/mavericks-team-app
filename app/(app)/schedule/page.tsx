@@ -3,12 +3,15 @@ import { cookies } from "next/headers";
 import { FullCalendarWrapper } from "@/components/schedule/FullCalendarWrapper";
 import { Card, CardContent } from "@/components/ui/card";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { getEvents } from "@/lib/actions";
+import { getEvents, getRsvpCountsForEvents, getRsvpsForEvents, getRoster } from "@/lib/actions";
 
 export const dynamic = 'force-dynamic';
 
 export default async function SchedulePage() {
   let events: any[] = [];
+  let rsvpCounts: any = {};
+  let rsvpsByEvent: any = {};
+  let rosterPlayers: any[] = [];
   let isCoach = false;
   let hasError = false;
   let errorMsg = '';
@@ -19,7 +22,7 @@ export default async function SchedulePage() {
   try {
     const supabase = await createClient();
 
-    // 1. Minimal auth + coach check - separate try
+    // 1. Auth + coach check - wrapped
     try {
       if (isTempCoach) {
         isCoach = true;
@@ -50,17 +53,45 @@ export default async function SchedulePage() {
       isCoach = isTempCoach;
     }
 
-    // Use shared safe function (which uses .select('*') + try/catch + returns [])
+    // 2. Events - safe via action
     try {
-      const fetched = await getEvents();
-      events = (fetched || [])
-        .filter((e: any) => e && e.id != null && e.start_time);
+      const fetched = await getEvents().catch((e) => {
+        console.error("PAGE ERROR:", e);
+        return [] as any[];
+      });
+      events = (fetched || []).filter((e: any) => e && e.id != null && e.start_time);
     } catch (evErr: any) {
       console.error("PAGE ERROR:", evErr);
       console.error('[Schedule] getEvents failed:', evErr);
       events = [];
-      hasError = true;
-      errorMsg = 'Failed to load events.';
+    }
+
+    // 3. RSVPs and Roster - ultra safe, return empty on error
+    try {
+      const eventIds = events.map((e: any) => e.id);
+      if (eventIds.length > 0) {
+        rsvpCounts = await getRsvpCountsForEvents(eventIds).catch((e) => {
+          console.error("PAGE ERROR:", e);
+          console.error('[Schedule] getRsvpCounts failed:', e);
+          return {} as any;
+        });
+        rsvpsByEvent = await getRsvpsForEvents(eventIds).catch((e) => {
+          console.error("PAGE ERROR:", e);
+          console.error('[Schedule] getRsvpsForEvents failed:', e);
+          return {} as any;
+        });
+      }
+      rosterPlayers = await getRoster().catch((e) => {
+        console.error("PAGE ERROR:", e);
+        console.error('[Schedule] getRoster failed:', e);
+        return [] as any[];
+      });
+    } catch (dataErr: any) {
+      console.error("PAGE ERROR:", dataErr);
+      console.error('[Schedule] rsvp/roster data fetch failed:', dataErr);
+      rsvpCounts = {};
+      rsvpsByEvent = {};
+      rosterPlayers = [];
     }
   } catch (pageErr: any) {
     console.error("PAGE ERROR:", pageErr);
@@ -68,6 +99,9 @@ export default async function SchedulePage() {
     hasError = true;
     errorMsg = 'Something went wrong loading the schedule.';
     events = [];
+    rsvpCounts = {};
+    rsvpsByEvent = {};
+    rosterPlayers = [];
   }
 
   return (
@@ -97,9 +131,9 @@ export default async function SchedulePage() {
         <FullCalendarWrapper
           events={events as any}
           isCoach={isCoach}
-          initialRsvpCounts={{}}
-          rsvpsByEvent={{}}
-          rosterPlayers={[]}
+          initialRsvpCounts={rsvpCounts}
+          rsvpsByEvent={rsvpsByEvent}
+          rosterPlayers={rosterPlayers}
         />
       </ErrorBoundary>
 

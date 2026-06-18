@@ -291,6 +291,7 @@ export async function getRsvpCountsForEvents(eventIds: (number | string)[]): Pro
 
     return counts;
   } catch (e: any) {
+    console.error("PAGE ERROR:", e);
     console.warn('[getRsvpCountsForEvents] error (returning {}):', e?.message);
     return {};
   }
@@ -300,9 +301,9 @@ export async function getRsvpCountsForEvents(eventIds: (number | string)[]): Pro
 export async function getRsvpsForEvents(eventIds: (number | string)[]): Promise<Record<number | string, any[]>> {
   if (!eventIds.length) return {};
 
-  const supabase = await getSupabaseForReadWrite();
-
   try {
+    const supabase = await getSupabaseForReadWrite();
+
     const { data: rsvps, error } = await supabase
       .from("rsvps")
       .select("*")
@@ -325,6 +326,7 @@ export async function getRsvpsForEvents(eventIds: (number | string)[]): Promise<
 
     return byEvent;
   } catch (e: any) {
+    console.error("PAGE ERROR:", e);
     console.warn("getRsvpsForEvents error (returning empty):", e?.message);
     return {};
   }
@@ -387,8 +389,8 @@ export async function getRoster() {
     ] as any;
   }
 
-  const supabase = await getSupabaseForReadWrite();
   try {
+    const supabase = await getSupabaseForReadWrite();
     // Minimal safe query post table reset: basic player fields + simple family name (no deep profile join to avoid FK/RLS issues when tables empty)
     const { data: playersData, error: pErr } = await supabase
       .from('players')
@@ -414,7 +416,8 @@ export async function getRoster() {
       ...p,
       family: familiesMap[p.family_id] || { id: p.family_id, name: 'Unassigned' }
     })) as any[];
-  } catch {
+  } catch (e: any) {
+    console.error("PAGE ERROR:", e);
     if (isTemp) {
       // Rich demo data with contacts for temp/roster testing
       const now = new Date();
