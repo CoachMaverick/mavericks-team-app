@@ -21,10 +21,16 @@ export default async function AppLayout({
   let profile: any = null;
 
   // Always attempt real Supabase authentication first (prefer real profile data)
-  const supabase = await createClient();
-  const {
-    data: { user: realUser },
-  } = await supabase.auth.getUser();
+  let realUser: any = null;
+  let supabase: any = null;
+  try {
+    supabase = await createClient();
+    const { data: { user: u } } = await supabase.auth.getUser();
+    realUser = u;
+  } catch (e) {
+    console.warn('Supabase auth getUser failed in layout (missing config/tables?):', (e as any)?.message);
+    realUser = null;
+  }
 
   if (realUser) {
     user = realUser;
@@ -36,7 +42,7 @@ export default async function AppLayout({
         .from("profiles")
         .select("*")
         .eq("id", realUser.id)
-        .single<Profile>();
+        .single();
       profile = realProfile;
     } catch (e) {
       console.warn("Profile fetch failed in layout (missing table/columns?):", (e as any)?.message);

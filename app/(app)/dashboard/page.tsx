@@ -44,57 +44,86 @@ export default async function DashboardPage() {
     // defaults already initialized above
   }
 
-  const paidCents = allInvoices
-    .filter((i: any) => i.status === 'paid')
-    .reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
-  const pendingCents = allInvoices
-    .filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled')
-    .reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
-  const paidFamilySet = new Set(
-    allInvoices.filter((i: any) => i.status === 'paid').map((i: any) => i.family_id)
-  );
+  // Processing with extra safety to prevent render crashes on bad/missing data
+  let paidCents = 0;
+  let pendingCents = 0;
+  let paidFamilySet = new Set();
+  let upcomingEvents: any[] = [];
+  let totalPlayers = 0;
+  let activeFamilies = 0;
+  let recentActivity: any[] = [];
 
-  // Upcoming events (next 3-5)
-  const upcomingEvents = upcomingEventsRaw.map((ev: any) => {
-    const startDate = new Date(ev.start_time);
-    const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const timeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    return {
-      id: ev.id,
-      title: ev.title,
-      date: dateStr,
-      time: timeStr,
-      location: ev.location || 'TBD',
-    };
-  });
+  try {
+    const safeInvoices = Array.isArray(allInvoices) ? allInvoices.filter((i: any) => i && typeof i === 'object') : [];
+    paidCents = safeInvoices
+      .filter((i: any) => i.status === 'paid')
+      .reduce((s: number, i: any) => s + (Number(i.amount_cents) || 0), 0);
+    pendingCents = safeInvoices
+      .filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled')
+      .reduce((s: number, i: any) => s + (Number(i.amount_cents) || 0), 0);
+    paidFamilySet = new Set(
+      safeInvoices.filter((i: any) => i.status === 'paid').map((i: any) => i.family_id).filter(Boolean)
+    );
 
-  // Roster snapshot
-  const totalPlayers = roster.length;
-  const activeFamilies = new Set(roster.map((p: any) => p.family_id).filter(Boolean)).size;
+    // Upcoming events (next 3-5)
+    const safeUpcoming = Array.isArray(upcomingEventsRaw) ? upcomingEventsRaw.filter((ev: any) => ev && typeof ev === 'object') : [];
+    upcomingEvents = safeUpcoming.map((ev: any) => {
+      try {
+        const startDate = new Date(ev.start_time || 0);
+        const dateStr = isNaN(startDate.getTime()) ? 'TBD' : startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const timeStr = isNaN(startDate.getTime()) ? '' : startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return {
+          id: ev.id,
+          title: ev.title || 'Event',
+          date: dateStr,
+          time: timeStr,
+          location: ev.location || 'TBD',
+        };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
 
-  // Recent Activity: latest team chat messages (most recent first)
-  let recentActivity = [...recentMsgs]
-    .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 4)
-    .map((m: any) => ({
-      id: m.id,
-      content: (m.content || '').slice(0, 80) + ((m.content || '').length > 80 ? '...' : ''),
-      sender: m.sender?.first_name || (m.sender_id === 'temp-coach-id' ? 'Coach' : 'Teammate'),
-      time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    }));
+    // Roster snapshot
+    const safeRoster = Array.isArray(roster) ? roster.filter((p: any) => p && typeof p === 'object') : [];
+    totalPlayers = safeRoster.length;
+    activeFamilies = new Set(safeRoster.map((p: any) => p.family_id).filter(Boolean)).size;
 
-  // Mix in a recent pinned announcement if available (for variety in activity feed)
-  if (pinnedAnns.length > 0 && recentActivity.length < 4) {
-    const a = pinnedAnns[0];
-    recentActivity = [
-      ...recentActivity,
-      {
-        id: `ann-${a.id}`,
-        content: a.title + ': ' + (a.body || '').slice(0, 50) + '...',
-        sender: 'Coach',
-        time: new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-    ];
+    // Recent Activity: latest team chat messages (most recent first)
+    const safeRecent = Array.isArray(recentMsgs) ? recentMsgs.filter((m: any) => m && typeof m === 'object') : [];
+    recentActivity = [...safeRecent]
+      .sort((a: any, b: any) => {
+        try {
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        } catch {
+          return 0;
+        }
+      })
+      .slice(0, 4)
+      .map((m: any) => ({
+        id: m.id,
+        content: (m.content || '').slice(0, 80) + ((m.content || '').length > 80 ? '...' : ''),
+        sender: m.sender?.first_name || (m.sender_id === 'temp-coach-id' ? 'Coach' : 'Teammate'),
+        time: (() => { try { return new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } })(),
+      }));
+
+    // Mix in a recent pinned announcement if available (for variety in activity feed)
+    const safePinned = Array.isArray(pinnedAnns) ? pinnedAnns.filter((a: any) => a && typeof a === 'object') : [];
+    if (safePinned.length > 0 && recentActivity.length < 4) {
+      const a = safePinned[0];
+      recentActivity = [
+        ...recentActivity,
+        {
+          id: `ann-${a.id || Date.now()}`,
+          content: (a.title || 'Announcement') + ': ' + ((a.body || '').slice(0, 50) + '...'),
+          sender: 'Coach',
+          time: (() => { try { return new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } })(),
+        },
+      ];
+    }
+  } catch (e: any) {
+    console.warn('[Dashboard] processing error (using safe defaults):', e?.message || e);
+    // keep the zero/empty defaults defined above
   }
 
   return (

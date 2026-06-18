@@ -846,8 +846,9 @@ export async function getInvoices(familyId?: string) {
     }
     const { data, error } = await query;
     if (error) throw error;
-    console.log('[getInvoices] returned', (data || []).length, 'rows (real DB or privileged)');
-    return data || [];
+    const invData = Array.isArray(data) ? data.filter((i: any) => i && typeof i === 'object') : [];
+    console.log('[getInvoices] returned', invData.length, 'rows (real DB or privileged)');
+    return invData;
   } catch (e: any) {
     console.warn('[getInvoices] query failed, returning empty. err:', e?.message || e);
     return [];
@@ -1200,21 +1201,22 @@ export async function getTeamPaymentSummary() {
   try {
     const { data: invoices, error } = await supabase.from('invoices').select('amount_cents, status, due_date, family_id');
     if (error) throw error;
-    const invList = invoices || [];
-    const outstanding = invList.filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled');
-    const totalOwedCents = outstanding.reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
-    const uniqueFamilies = new Set(outstanding.map((i: any) => i.family_id));
+    const invList = Array.isArray(invoices) ? invoices : [];
+    const safeInv = invList.filter((i: any) => i && typeof i === 'object');
+    const outstanding = safeInv.filter((i: any) => i.status !== 'paid' && i.status !== 'cancelled');
+    const totalOwedCents = outstanding.reduce((s: number, i: any) => s + (Number(i.amount_cents) || 0), 0);
+    const uniqueFamilies = new Set(outstanding.map((i: any) => i.family_id).filter(Boolean));
     const today = new Date().toISOString().split('T')[0];
     const upcoming = outstanding.filter((i: any) => i.due_date >= today);
-    const upcomingCents = upcoming.reduce((s: number, i: any) => s + (i.amount_cents || 0), 0);
-    const paidCount = invList.filter((i: any) => i.status === 'paid').length;
+    const upcomingCents = upcoming.reduce((s: number, i: any) => s + (Number(i.amount_cents) || 0), 0);
+    const paidCount = safeInv.filter((i: any) => i.status === 'paid').length;
     return {
       totalOwedCents,
       familiesWithBalance: uniqueFamilies.size,
       upcomingCents,
       upcomingCount: upcoming.length,
       paidCount,
-      totalInvoices: invList.length,
+      totalInvoices: safeInv.length,
     };
   } catch (e: any) {
     console.warn('[getTeamPaymentSummary] err, returning empty summary:', e?.message);
