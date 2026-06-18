@@ -242,39 +242,8 @@ export async function getEvents(options?: { upcomingOnly?: boolean; limit?: numb
   const { data, error } = await query;
 
   if (error) {
-    console.warn("getEvents error (falling back to demo):", error.message);
-    // Demo fallback with integer IDs
-    const demo = [
-      {
-        id: 1,
-        title: "Spring Practice #3",
-        type: "practice",
-        start_time: new Date(Date.now() + 1000 * 3600 * 24 * 2).toISOString(),
-        end_time: new Date(Date.now() + 1000 * 3600 * 24 * 2 + 3600 * 2).toISOString(),
-        location: "Central Park Field 3",
-        opponent: null,
-        description: "Focus on hitting and base running.",
-        created_by: null,
-        is_cancelled: false,
-        created_at: new Date().toISOString(),
-        updated_at: null,
-      },
-      {
-        id: 2,
-        title: "Game vs Tigers",
-        type: "game",
-        start_time: new Date(Date.now() + 1000 * 3600 * 24 * 5).toISOString(),
-        end_time: null,
-        location: "Lincoln Elementary",
-        opponent: "Tigers 12U",
-        description: "",
-        created_by: null,
-        is_cancelled: false,
-        created_at: new Date().toISOString(),
-        updated_at: null,
-      },
-    ] as any;
-    return demo;
+    console.warn("getEvents error (returning empty):", error.message);
+    return [];
   }
 
   return data || [];
@@ -283,35 +252,39 @@ export async function getEvents(options?: { upcomingOnly?: boolean; limit?: numb
 // Simple helper to get RSVP counts for a set of events (used for dashboard/schedule summaries)
 export async function getRsvpCountsForEvents(eventIds: (number | string)[]): Promise<Record<number | string, { yes: number; no: number; maybe: number; total: number }>> {
   if (!eventIds.length) return {};
+  try {
+    const supabase = await getSupabaseForReadWrite();
 
-  const supabase = await getSupabaseForReadWrite();
+    const { data: rsvps, error } = await supabase
+      .from("rsvps")
+      .select("event_id, response")
+      .in("event_id", eventIds.map(id => Number(id)));
 
-  const { data: rsvps, error } = await supabase
-    .from("rsvps")
-    .select("event_id, response")
-    .in("event_id", eventIds.map(id => Number(id)));
+    if (error || !rsvps) {
+      return {};
+    }
 
-  if (error || !rsvps) {
+    const counts: Record<string, any> = {};
+
+    eventIds.forEach(id => {
+      counts[id] = { yes: 0, no: 0, maybe: 0, total: 0 };
+    });
+
+    rsvps.forEach((r: any) => {
+      if (counts[r.event_id]) {
+        const resp = r.response;
+        if (counts[r.event_id][resp] !== undefined) {
+          counts[r.event_id][resp] = (counts[r.event_id][resp] || 0) + 1;
+          counts[r.event_id].total += 1;
+        }
+      }
+    });
+
+    return counts;
+  } catch (e: any) {
+    console.warn('[getRsvpCountsForEvents] error (returning {}):', e?.message);
     return {};
   }
-
-  const counts: Record<string, any> = {};
-
-  eventIds.forEach(id => {
-    counts[id] = { yes: 0, no: 0, maybe: 0, total: 0 };
-  });
-
-  rsvps.forEach((r: any) => {
-    if (counts[r.event_id]) {
-      const resp = r.response;
-      if (counts[r.event_id][resp] !== undefined) {
-        counts[r.event_id][resp] = (counts[r.event_id][resp] || 0) + 1;
-        counts[r.event_id].total += 1;
-      }
-    }
-  });
-
-  return counts;
 }
 
 // Get RSVPs for specific events, with roster names for display
@@ -340,24 +313,8 @@ export async function getRsvpsForEvents(eventIds: (number | string)[]): Promise<
 
     return byEvent;
   } catch (e: any) {
-    console.warn("getRsvpsForEvents fallback (demo):", e?.message);
-    // Demo data using roster names
-    const demo: Record<number | string, any[]> = {};
-    if (eventIds.length > 0) {
-      const firstId = eventIds[0];
-      demo[firstId] = [
-        { response: "yes", family_name: "Johnson Family", notes: "" },
-        { response: "yes", family_name: "Johnson Family", notes: "Liam and Noah" },
-        { response: "maybe", family_name: "Martinez Family", notes: "" },
-      ];
-      if (eventIds.length > 1) {
-        demo[eventIds[1]] = [
-          { response: "yes", family_name: "Martinez Family", notes: "" },
-          { response: "no", family_name: "Johnson Family", notes: "" },
-        ];
-      }
-    }
-    return demo;
+    console.warn("getRsvpsForEvents error (returning empty):", e?.message);
+    return {};
   }
 }
 
@@ -371,12 +328,9 @@ export async function getFamilies() {
     const { data, error } = await supabase.from('families').select('id, name').order('name');
     if (error) throw error;
     return data || [];
-  } catch {
-    // Temp bypass demo data
-    return [
-      { id: 'fam1', name: 'Maverick Family (Temp)' },
-      { id: 'fam2', name: 'Johnson Family (Temp)' },
-    ];
+  } catch (e: any) {
+    console.warn('[getFamilies] error (returning empty):', e?.message);
+    return [];
   }
 }
 
@@ -386,14 +340,9 @@ export async function getPlayers() {
     const { data, error } = await supabase.from('players').select('id, first_name, last_name, family_id').order('last_name');
     if (error) throw error;
     return data || [];
-  } catch {
-    // Temp bypass demo data matching getFamilies demo
-    return [
-      { id: 'p1', first_name: 'Liam', last_name: 'Johnson', family_id: 'fam1' },
-      { id: 'p2', first_name: 'Noah', last_name: 'Johnson', family_id: 'fam1' },
-      { id: 'p3', first_name: 'Sophia', last_name: 'Martinez', family_id: 'fam2' },
-      { id: 'p4', first_name: 'Mateo', last_name: 'Martinez', family_id: 'fam2' },
-    ] as any;
+  } catch (e: any) {
+    console.warn('[getPlayers] error (returning empty):', e?.message);
+    return [];
   }
 }
 
@@ -1259,13 +1208,9 @@ export async function getChatMembers() {
       .order('last_name', { ascending: true });
     if (error) throw error;
     return data || [];
-  } catch {
-    // fallback demo
-    return [
-      { id: 'temp-coach-id', first_name: 'Coach', last_name: 'Maverick', role: 'coach' as const },
-      { id: 'p-johnson', first_name: 'Alex', last_name: 'Johnson', role: 'parent' as const },
-      { id: 'p-martinez', first_name: 'Maria', last_name: 'Martinez', role: 'parent' as const },
-    ];
+  } catch (e: any) {
+    console.warn("getChatMembers error (returning empty):", e?.message);
+    return [];
   }
 }
 
@@ -1362,40 +1307,10 @@ export async function getMessages(
 
     return enriched;
   } catch (e: any) {
-    // Demo fallback path (also hit intentionally for temp DMs with demo ids)
     if (!String(e?.message || '').includes('demo-dm-short-circuit')) {
-      console.warn('[getMessages] error, using demo:', e?.message);
+      console.warn('[getMessages] error (returning empty):', e?.message);
     }
-    const now = new Date();
-    const demoTeam = [
-      { 
-        id: 'm1', created_at: new Date(now.getTime() - 1000*60*30).toISOString(), updated_at: new Date(now.getTime() - 1000*60*20).toISOString(), sender_id: 'temp-coach-id', channel_type: 'team', recipient_id: null, content: 'Welcome to the team chat! Season starts soon.', read_by: ['temp-coach-id'], 
-        reactions: { '👍': ['p-johnson'], '🔥': ['temp-coach-id'] },
-        is_pinned: false,
-        is_deleted: false,
-        sender: { id: 'temp-coach-id', first_name: 'Coach', last_name: 'Maverick', role: 'coach' } 
-      },
-      // Demo media message (uses public placeholder; real uploads use Supabase Storage chat-media bucket)
-      { 
-        id: 'm2', created_at: new Date(now.getTime() - 1000*60*5).toISOString(), sender_id: 'temp-coach-id', channel_type: 'team', recipient_id: null, content: 'Check out this action shot from practice!', media_url: 'https://picsum.photos/id/1015/600/400', media_type: 'image/jpeg', read_by: ['temp-coach-id'], 
-        reactions: { '❤️': ['temp-coach-id', 'p-martinez'] },
-        is_deleted: false,
-        sender: { id: 'temp-coach-id', first_name: 'Coach', last_name: 'Maverick', role: 'coach' } 
-      },
-    ];
-    if (channelType === 'direct' && recipientId) {
-      return [
-        { id: 'dm1', created_at: new Date(now.getTime() - 1000*60*10).toISOString(), sender_id: 'temp-coach-id', channel_type: 'direct', recipient_id: recipientId, content: 'Hey, any updates on the game time?', read_by: [], 
-          reactions: {},
-          is_deleted: false,
-          sender: { id: 'temp-coach-id', first_name: 'Coach', last_name: 'Maverick', role: 'coach' } 
-        },
-      ];
-    }
-    if (options.pinnedOnly) {
-      return demoTeam.filter(m => m.is_pinned);
-    }
-    return demoTeam;
+    return [];
   }
 }
 
@@ -1591,10 +1506,8 @@ export async function getPinnedAnnouncements() {
       creator: null, // UI falls back to "Coach"
     }));
   } catch (e: any) {
-    console.warn('[getPinnedAnnouncements] demo:', e?.message);
-    return [
-      { id: 1, title: 'Season Kickoff!', body: 'First practice this Saturday. Bring water!', is_pinned: true, created_at: new Date().toISOString(), creator: { first_name: 'Coach', last_name: 'Maverick' } },
-    ];
+    console.warn('[getPinnedAnnouncements] error (returning empty):', e?.message);
+    return [];
   }
 }
 
@@ -1820,65 +1733,80 @@ export async function getUnreadNotificationCount(userId?: string) {
 // Get recent notifications
 export async function getNotifications(limit = 20) {
   noStore();
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
-  let uid: string | null = null;
+  try {
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
+    let uid: string | null = null;
 
-  if (isTemp) {
-    uid = 'temp-coach-id';
-  } else {
-    const supabaseAuth = await createClient();
-    const { data: { user } } = await supabaseAuth.auth.getUser();
-    uid = user?.id || null;
-  }
+    if (isTemp) {
+      uid = 'temp-coach-id';
+    } else {
+      const supabaseAuth = await createClient();
+      const { data: { user } } = await supabaseAuth.auth.getUser();
+      uid = user?.id || null;
+    }
 
-  if (!uid) return [];
+    if (!uid) return [];
 
-  const supabase = await getSupabaseForReadWrite();
-  const { data, error } = await supabase
-    .from('notifications')
-    .select('*')
-    .eq('user_id', uid)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+    const supabase = await getSupabaseForReadWrite();
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
-  if (error) {
-    console.warn('[getNotifications]', error.message);
+    if (error) {
+      console.warn('[getNotifications]', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (e: any) {
+    console.warn('[getNotifications] error (returning empty):', e?.message);
     return [];
   }
-  return data || [];
 }
 
 export async function markNotificationRead(notificationId: string) {
-  const supabase = await getSupabaseForReadWrite();
-  const { error } = await supabase
-    .from('notifications')
-    .update({ is_read: true } as any)
-    .eq('id', notificationId);
+  try {
+    const supabase = await getSupabaseForReadWrite();
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true } as any)
+      .eq('id', notificationId);
 
-  if (error) throw new Error(error.message || 'Failed to mark read');
+    if (error) throw new Error(error.message || 'Failed to mark read');
 
-  revalidateTag('notifications');
-  return { success: true };
+    revalidateTag('notifications');
+    return { success: true };
+  } catch (e: any) {
+    console.warn('[markNotificationRead] error:', e?.message);
+    throw e;
+  }
 }
 
 export async function markAllNotificationsRead() {
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
-  const uid = isTemp ? 'temp-coach-id' : null;
-  if (!uid) return { success: true };
+  try {
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
+    const uid = isTemp ? 'temp-coach-id' : null;
+    if (!uid) return { success: true };
 
-  const supabase = await getSupabaseForReadWrite();
-  const { error } = await supabase
-    .from('notifications')
-    .update({ is_read: true } as any)
-    .eq('user_id', uid)
-    .eq('is_read', false);
+    const supabase = await getSupabaseForReadWrite();
+    const { error } = await supabase
+      .from('notifications')
+      .update({ is_read: true } as any)
+      .eq('user_id', uid)
+      .eq('is_read', false);
 
-  if (error) throw new Error(error.message || 'Failed to mark all read');
+    if (error) throw new Error(error.message || 'Failed to mark all read');
 
-  revalidateTag('notifications');
-  return { success: true };
+    revalidateTag('notifications');
+    return { success: true };
+  } catch (e: any) {
+    console.warn('[markAllNotificationsRead] error:', e?.message);
+    throw e;
+  }
 }
 
 // Preferences (simple for coaches/admins in admin UI for now)

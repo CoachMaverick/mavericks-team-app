@@ -112,25 +112,36 @@ export default function RosterPage() {
     loadRoster();
   }, [isTemp]);
 
-  // Client-side filtered + grouped
+  // Client-side filtered + grouped - safe
   const filteredPlayers = useMemo(() => {
-    if (!searchTerm.trim()) return players;
-    const q = searchTerm.toLowerCase();
-    return players.filter(p =>
-      `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-      p.family?.name?.toLowerCase().includes(q) ||
-      p.position?.toLowerCase().includes(q) ||
-      p.family?.parent_names?.toLowerCase().includes(q)
-    );
+    try {
+      const safePlayers = Array.isArray(players) ? players.filter(p => p && typeof p === 'object') : [];
+      if (!searchTerm.trim()) return safePlayers;
+      const q = searchTerm.toLowerCase();
+      return safePlayers.filter(p =>
+        `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase().includes(q) ||
+        (p.family?.name || '').toLowerCase().includes(q) ||
+        (p.position || '').toLowerCase().includes(q) ||
+        (p.family?.parent_names || '').toLowerCase().includes(q)
+      );
+    } catch (e) {
+      console.warn('Roster filter error:', e);
+      return [];
+    }
   }, [players, searchTerm]);
 
   const byFamily = useMemo(() => {
-    return filteredPlayers.reduce((acc, player) => {
-      const famName = player.family?.name || 'Unassigned';
-      if (!acc[famName]) acc[famName] = [];
-      acc[famName].push(player);
-      return acc;
-    }, {} as Record<string, RosterPlayer[]>);
+    try {
+      return filteredPlayers.reduce((acc, player) => {
+        const famName = player.family?.name || 'Unassigned';
+        if (!acc[famName]) acc[famName] = [];
+        acc[famName].push(player);
+        return acc;
+      }, {} as Record<string, RosterPlayer[]>);
+    } catch (e) {
+      console.warn('Roster group error:', e);
+      return {};
+    }
   }, [filteredPlayers]);
 
   // Form helpers

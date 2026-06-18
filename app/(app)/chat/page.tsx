@@ -139,9 +139,9 @@ export default function ChatPage() {
         if (uid) {
           await loadInitialData(uid);
         }
-      } catch (e) {
-        console.warn('Chat user load error:', e);
-        setLoadError('Failed to load user data. Some features may be limited.');
+      } catch (e: any) {
+        console.warn('Chat user load error:', e?.message);
+        setLoadError('Something went wrong loading chat. Some features may be unavailable.');
       } finally {
         setLoading(false);
       }
@@ -152,12 +152,10 @@ export default function ChatPage() {
   const loadPinnedAnnouncements = async () => {
     try {
       const pins = await getPinnedAnnouncements();
-      setPinned(pins as Announcement[]);
+      setPinned(Array.isArray(pins) ? (pins as Announcement[]) : []);
     } catch (e: any) {
-      console.warn('getPinnedAnnouncements error (using demo):', e?.message);
-      setPinned([
-        { id: 1, title: 'Season Kickoff!', body: 'First practice this Saturday. Bring water!', is_pinned: true, created_at: new Date().toISOString(), creator: { first_name: 'Coach', last_name: 'Maverick' } },
-      ]);
+      console.warn('getPinnedAnnouncements error (returning empty):', e?.message);
+      setPinned([]);
     }
   };
 
@@ -188,14 +186,13 @@ export default function ChatPage() {
         }
       });
       setUnreadMap(unread);
-    } catch (e) {
-      console.warn('Chat initial load error (demo may be used):', e);
-      setLoadError('Failed to load chat data. Using demo fallback.');
-      // fallback
-      setPinned([
-        { id: 1, title: 'Season Kickoff!', body: 'First practice this Saturday. Bring water!', is_pinned: true, created_at: new Date().toISOString(), creator: { first_name: 'Coach', last_name: 'Maverick' } },
-      ]);
-      setPinnedMessagesList([]); // pinned list only from DB query in success path
+    } catch (e: any) {
+      console.warn('Chat initial load error (returning empty):', e?.message);
+      setLoadError('Something went wrong loading chat data. Some features may be unavailable.');
+      setPinned([]);
+      setPinnedMessagesList([]);
+      setMessages([]);
+      setMembers([]);
     }
   };
 
@@ -209,27 +206,34 @@ export default function ChatPage() {
   const pinnedMessages = activeView === 'team' ? pinnedMessagesList : [];
 
   const displayMessages = useMemo(() => {
-    const q = searchTerm.toLowerCase().trim();
-    // When searching, search across ALL messages (pinned + regular) so important msgs can be found.
-    // Exclude using the fresh DB-fetched pinnedMessagesList (no client is_pinned on messages used for section).
-    let source = activeView === 'team' ? messages.filter(m => !pinnedMessagesList.some(p => p.id === m.id)) : messages;
-    if (!q) {
-      return source;
-    }
-    const filtered = source.filter(m =>
-      (m.content || '').toLowerCase().includes(q) ||
-      (m.sender?.first_name || '').toLowerCase().includes(q) ||
-      (m.sender?.last_name || '').toLowerCase().includes(q)
-    );
-    // If currently editing a message, ensure it stays visible in results even if new text no longer matches query
-    if (editingId) {
-      const editingMsg = messages.find(m => m.id === editingId && (activeView !== 'team' || !pinnedMessagesList.some(p => p.id === m.id)));
-      if (editingMsg && !filtered.some(m => m.id === editingId)) {
-        return [...filtered, editingMsg];
+    try {
+      const q = searchTerm.toLowerCase().trim();
+      const safeMessages = Array.isArray(messages) ? messages.filter(m => m && typeof m === 'object') : [];
+      const safePinnedList = Array.isArray(pinnedMessagesList) ? pinnedMessagesList.filter(p => p && typeof p === 'object') : [];
+      // When searching, search across ALL messages (pinned + regular) so important msgs can be found.
+      // Exclude using the fresh DB-fetched pinnedMessagesList (no client is_pinned on messages used for section).
+      let source = activeView === 'team' ? safeMessages.filter(m => !safePinnedList.some(p => p.id === m.id)) : safeMessages;
+      if (!q) {
+        return source;
       }
+      const filtered = source.filter(m =>
+        (m.content || '').toLowerCase().includes(q) ||
+        (m.sender?.first_name || '').toLowerCase().includes(q) ||
+        (m.sender?.last_name || '').toLowerCase().includes(q)
+      );
+      // If currently editing a message, ensure it stays visible in results even if new text no longer matches query
+      if (editingId) {
+        const editingMsg = messages.find(m => m.id === editingId && (activeView !== 'team' || !safePinnedList.some(p => p.id === m.id)));
+        if (editingMsg && !filtered.some(m => m.id === editingId)) {
+          return [...filtered, editingMsg];
+        }
+      }
+      return filtered;
+    } catch (e) {
+      console.warn('Chat display filter error:', e);
+      return [];
     }
-    return filtered;
-  }, [messages, searchTerm, activeView, editingId, pinnedMessagesList]);
+  }, [searchTerm, activeView, messages, pinnedMessagesList, editingId]);
 
   // Keep refs in sync for realtime listener (avoids stale closures)
   useEffect(() => {
@@ -656,9 +660,14 @@ export default function ChatPage() {
           return copy;
         });
       }
-    } catch (e) {
-      toast.error('Failed to load messages');
-      if (activeView === 'team') setPinnedMessagesList([]); // will be reset by next successful fresh pinnedOnly query
+    } catch (e: any) {
+      console.warn('loadMessagesForView error (safe empty):', e?.message);
+      if (activeView === 'team') {
+        setPinnedMessagesList([]);
+        setMessages([]);
+      } else {
+        setMessages([]);
+      }
     }
   };
 

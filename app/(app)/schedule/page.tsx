@@ -46,7 +46,7 @@ export default async function SchedulePage() {
     } else {
       const {
         data: { user: realUser },
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getUser().catch(() => ({ data: { user: null } } as any));
 
       if (!realUser) {
         return (
@@ -74,27 +74,50 @@ export default async function SchedulePage() {
     isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
 
     // Fetch events (via action for consistent temp-coach handling via service role)
-    events = await getEvents().catch(() => [] as Event[]);
+    try {
+      events = await getEvents().catch(() => [] as Event[]);
+    } catch {
+      events = [];
+    }
 
-    const eventIds = events.map(e => e.id);
-    rsvpCounts = eventIds.length > 0 ? await getRsvpCountsForEvents(eventIds).catch(() => ({} as any)) : {};
-    rsvpsByEvent = eventIds.length > 0 ? await getRsvpsForEvents(eventIds).catch(() => ({} as any)) : {};
-    rosterPlayers = await getRoster().catch(() => [] as any[]);
+    let eventIds: (number | string)[] = [];
+    try {
+      eventIds = (events || []).map((e: any) => e?.id).filter(Boolean);
+    } catch { eventIds = []; }
 
-    // Simple upcoming list (sorted, limited) - with safe guards
-    upcoming = [...events]
-      .filter(e => e && !e.is_cancelled && e.start_time)
-      .sort((a, b) => {
-        try { return new Date(a.start_time).getTime() - new Date(b.start_time).getTime(); } catch { return 0; }
-      })
-      .slice(0, 10)
-      .map(ev => ({ ...ev }));  // ensure objects
+    try {
+      rsvpCounts = eventIds.length > 0 ? await getRsvpCountsForEvents(eventIds).catch(() => ({} as any)) : {};
+    } catch { rsvpCounts = {}; }
+    try {
+      rsvpsByEvent = eventIds.length > 0 ? await getRsvpsForEvents(eventIds).catch(() => ({} as any)) : {};
+    } catch { rsvpsByEvent = {}; }
+    try {
+      rosterPlayers = await getRoster().catch(() => [] as any[]);
+    } catch { rosterPlayers = []; }
+
+    // Simple upcoming list (sorted, limited) - with safe guards, never crash
+    try {
+      upcoming = [...(events || [])]
+        .filter((e: any) => e && !e.is_cancelled && e.start_time)
+        .sort((a: any, b: any) => {
+          try { return new Date(a.start_time).getTime() - new Date(b.start_time).getTime(); } catch { return 0; }
+        })
+        .slice(0, 10)
+        .map((ev: any) => ({ ...ev }));
+    } catch {
+      upcoming = [];
+    }
 
   } catch (e: any) {
     console.warn('Schedule page error (falling back gracefully):', e?.message);
     // All vars default to safe empty values defined above
     isCoach = false;
     hasError = true;
+    events = [];
+    rsvpCounts = {};
+    rsvpsByEvent = {};
+    rosterPlayers = [];
+    upcoming = [];
   }
 
   return (
@@ -136,30 +159,30 @@ export default async function SchedulePage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight mb-3">Upcoming Events</h2>
           <div className="grid gap-3 md:grid-cols-2">
-            {upcoming.map((ev) => (
+            {upcoming.filter((ev: any) => ev && ev.id).map((ev: any) => (
               <Card key={ev.id} className="mavericks-card">
                 <CardContent className="p-4 space-y-1 text-sm">
-                  <div className="font-semibold">{ev.title}</div>
+                  <div className="font-semibold">{ev.title || 'Untitled'}</div>
                   <div className="text-muted-foreground">
-                    {new Date(ev.start_time).toLocaleDateString()} • {new Date(ev.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {ev.start_time ? new Date(ev.start_time).toLocaleDateString() : 'TBD'} • {ev.start_time ? new Date(ev.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                   </div>
                   {ev.location && <div>Location: {ev.location}</div>}
                   {ev.opponent && <div>vs {ev.opponent}</div>}
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">{ev.type}</div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">{ev.type || 'event'}</div>
                   {ev.description && <div className="text-muted-foreground text-xs line-clamp-2">{ev.description}</div>}
                   {rsvpCounts[ev.id] && (
                     <div className="text-xs mt-1 flex gap-1 flex-wrap">
-                      <span className="bg-green-600 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].yes} Yes</span>
-                      <span className="bg-yellow-500 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].maybe} Maybe</span>
-                      <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].no} No</span>
+                      <span className="bg-green-600 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].yes || 0} Yes</span>
+                      <span className="bg-yellow-500 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].maybe || 0} Maybe</span>
+                      <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-medium">{rsvpCounts[ev.id].no || 0} No</span>
                     </div>
                   )}
                   {rsvpsByEvent[ev.id] && rsvpsByEvent[ev.id].length > 0 && (
                     <div className="text-[10px] mt-0.5 text-muted-foreground truncate">
-                      {rsvpsByEvent[ev.id].slice(0,3).map((r: any, i: number) => (
-                        <span key={i}>{r.family_name}{i < Math.min(rsvpsByEvent[ev.id].length-1, 2) ? ', ' : ''}</span>
+                      {(rsvpsByEvent[ev.id] || []).slice(0,3).map((r: any, i: number) => (
+                        <span key={i}>{r.family_name || 'Unknown'}{i < Math.min((rsvpsByEvent[ev.id] || []).length-1, 2) ? ', ' : ''}</span>
                       ))}
-                      {rsvpsByEvent[ev.id].length > 3 && ` +${rsvpsByEvent[ev.id].length-3}`}
+                      {(rsvpsByEvent[ev.id] || []).length > 3 && ` +${(rsvpsByEvent[ev.id] || []).length-3}`}
                     </div>
                   )}
                 </CardContent>

@@ -110,6 +110,18 @@ export default function AdminPage() {
     if (saved) {
       setCurrentLogo(saved);
     }
+    // Attempt a safe probe of key admin queries for graceful banner (non-blocking)
+    (async () => {
+      try {
+        await Promise.all([
+          getFamilies().catch(() => []),
+          getInvoices().catch(() => []),
+        ]);
+      } catch (e) {
+        console.warn('Admin top probe load issue (non-fatal):', e);
+        setLoadError('Something went wrong loading some admin data.');
+      }
+    })();
   }, []);
 
   // Helper to refresh server data + force list reload. For real: revalidate + fetch fresh from Supabase.
@@ -163,7 +175,7 @@ export default function AdminPage() {
     <div className="space-y-6">
       {loadError && (
         <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
-          <span>{loadError} Some admin features limited.</span>
+          <span>{loadError} Some admin features may be unavailable.</span>
           <button onClick={() => window.location.reload()} className="text-sm underline">Try Again</button>
         </div>
       )}
@@ -279,8 +291,8 @@ export default function AdminPage() {
               const supabase = createClient();
               const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
               try {
-                const settings = isTemp ? { dues_monthly_cents: 12500 } : await getTeamSettings();
-                const fams = isTemp ? [{id:'fam1',name:'Maverick Family (Temp)'},{id:'fam2',name:'Johnson Family (Temp)'}] : await getFamilies();
+                const settings = isTemp ? { dues_monthly_cents: 12500 } : await getTeamSettings().catch(() => ({ dues_monthly_cents: 12500 }));
+                const fams = isTemp ? [{id:'fam1',name:'Maverick Family (Temp)'},{id:'fam2',name:'Johnson Family (Temp)'}] : (await getFamilies().catch(() => []));
                 const today = new Date();
                 const dueDate = new Date(today.getFullYear(), today.getMonth() + 1, 1).toISOString().split('T')[0];
                 let count = 0;
@@ -343,8 +355,8 @@ export default function AdminPage() {
               const supabase = createClient();
               const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
               try {
-                const settings = isTemp ? { dues_season_cents: 150000 } : await getTeamSettings();
-                const fams = isTemp ? [{id:'fam1',name:'Maverick Family (Temp)'},{id:'fam2',name:'Johnson Family (Temp)'}] : await getFamilies();
+                const settings = isTemp ? { dues_season_cents: 150000 } : await getTeamSettings().catch(() => ({ dues_season_cents: 150000 }));
+                const fams = isTemp ? [{id:'fam1',name:'Maverick Family (Temp)'},{id:'fam2',name:'Johnson Family (Temp)'}] : (await getFamilies().catch(() => []));
                 const dueDate = new Date().toISOString().split('T')[0];
                 let count = 0;
                 let added: any[] = [];
@@ -441,7 +453,7 @@ function CreateInvoiceForm({ onSuccess, onAddForDemo, open }: { onSuccess: () =>
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    getFamilies().then(setFamilies).catch(() => {
+    getFamilies().then((d: any) => setFamilies(Array.isArray(d) ? d : [])).catch(() => {
       setFamilies([]);
     });
   }, []);
@@ -744,16 +756,16 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
     await revalidateInvoiceCache().catch(() => {});
     try {
       const [invData, famData, payMap] = await Promise.all([
-        getInvoices(), 
-        getFamilies(), 
-        getInvoicePaymentsMap()
+        getInvoices().catch(() => []), 
+        getFamilies().catch(() => []), 
+        getInvoicePaymentsMap().catch(() => ({}))
       ]);
-      setInvoices(invData || []);
-      setFamilies(famData || []);
+      setInvoices(Array.isArray(invData) ? invData : []);
+      setFamilies(Array.isArray(famData) ? famData : []);
       setPaymentsMap(payMap || {});
-    } catch (e) {
+    } catch (e: any) {
       // on error for real, show empty (no demo fallback)
-      console.warn('Admin DuesList load error for real, showing empty:', e);
+      console.warn('Admin DuesList load error for real, showing empty:', e?.message);
       setInvoices([]);
       setFamilies([]);
       setPaymentsMap({});
@@ -766,27 +778,32 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
 
   // Compute display status + paid info for an invoice
   function getInvoiceDisplay(inv: any) {
-    const total = inv.amount_cents || 0;
-    const paid = paymentsMap[inv.id] || 0;
-    let label: 'Paid' | 'Partial' | 'Unpaid';
-    let cls: string;
+    try {
+      const safeInv = inv || {};
+      const total = Number(safeInv.amount_cents) || 0;
+      const paid = paymentsMap[safeInv.id] || 0;
+      let label: 'Paid' | 'Partial' | 'Unpaid';
+      let cls: string;
 
-    if (inv.status === 'paid' || paid >= total) {
-      label = 'Paid';
-      cls = 'status-paid';
-    } else if (paid > 0) {
-      label = 'Partial';
-      cls = 'status-pending'; // amber
-    } else if (inv.status === 'overdue') {
-      label = 'Unpaid';
-      cls = 'status-overdue';
-    } else {
-      label = 'Unpaid';
-      cls = 'status-pending';
+      if (safeInv.status === 'paid' || paid >= total) {
+        label = 'Paid';
+        cls = 'status-paid';
+      } else if (paid > 0) {
+        label = 'Partial';
+        cls = 'status-pending'; // amber
+      } else if (safeInv.status === 'overdue') {
+        label = 'Unpaid';
+        cls = 'status-overdue';
+      } else {
+        label = 'Unpaid';
+        cls = 'status-pending';
+      }
+
+      const remaining = Math.max(0, total - paid);
+      return { label, cls, paid, remaining, total };
+    } catch {
+      return { label: 'Unpaid', cls: 'status-pending', paid: 0, remaining: 0, total: 0 };
     }
-
-    const remaining = Math.max(0, total - paid);
-    return { label, cls, paid, remaining, total };
   }
 
   const filteredInvoices = invoices
@@ -971,11 +988,18 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
 
   if (loading) return <div>Loading dues...</div>;
 
-  // Compute outstanding using real paid amounts for the filtered view
-  const totalOutstanding = filteredInvoices.reduce((s, i) => {
-    const d = getInvoiceDisplay(i);
-    return s + d.remaining;
-  }, 0);
+  let filteredInvoicesSafe: any[] = [];
+  let totalOutstanding = 0;
+  try {
+    filteredInvoicesSafe = Array.isArray(filteredInvoices) ? filteredInvoices.filter(Boolean) : [];
+    totalOutstanding = filteredInvoicesSafe.reduce((s, i) => {
+      const d = getInvoiceDisplay(i);
+      return s + (d.remaining || 0);
+    }, 0);
+  } catch (e) {
+    console.warn('Admin filtered computation error:', e);
+    filteredInvoicesSafe = [];
+  }
 
   return (
     <div className="space-y-3">
@@ -1015,15 +1039,15 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
           Clear
         </Button>
         <div className="text-xs self-center text-muted-foreground ml-auto">
-          Showing {filteredInvoices.length} • Outstanding in view: ${(totalOutstanding / 100).toFixed(2)}
+          Showing {filteredInvoicesSafe.length} • Outstanding in view: ${(totalOutstanding / 100).toFixed(2)}
         </div>
       </div>
 
       <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
-        {filteredInvoices.length === 0 && (
+        {filteredInvoicesSafe.length === 0 && (
           <div className="text-muted-foreground p-4 border rounded text-sm">No dues match current filters. Use the Create button or bulk actions above to add more.</div>
         )}
-        {filteredInvoices.map((inv: any) => {
+        {filteredInvoicesSafe.map((inv: any) => {
           const display = getInvoiceDisplay(inv);
           const isPaid = display.label === 'Paid';
           const amountStr = (inv.amount_cents / 100).toFixed(2);
