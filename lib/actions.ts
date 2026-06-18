@@ -26,39 +26,43 @@ async function getSupabaseForReadWrite() {
 
 // Example Server Action - will be expanded in the next phases
 export async function createRsvp(eventId: number | string, playerId: string, status: RsvpStatus, note?: string) {
-  const cookieStore = await cookies();
-  const isTemp = cookieStore.get("temp-coach")?.value === "1";
+  try {
+    const cookieStore = await cookies();
+    const isTemp = cookieStore.get("temp-coach")?.value === "1";
 
-  const supabase = isTemp ? await getSupabaseForReadWrite() : await createClient();
+    const supabase = isTemp ? await getSupabaseForReadWrite() : await createClient();
 
-  // Use simple demo family name for temp coach to match simplified schema
-  const familyName = isTemp ? "Demo Family" : (playerId || "Unknown Family");
+    // Use simple demo family name for temp coach to match simplified schema
+    const familyName = isTemp ? "Demo Family" : (playerId || "Unknown Family");
 
-  const { error } = await supabase.from("rsvps").insert(
-    {
-      event_id: Number(eventId),
-      response: status,
-      family_name: familyName,
-      notes: note || null,
-    } as any
-  );
+    // Delete-then-insert = robust upsert (handles vote changes, avoids dup rows)
+    // even when table has no (event_id, family_name) unique constraint yet.
+    await supabase
+      .from("rsvps")
+      .delete()
+      .eq("event_id", Number(eventId))
+      .eq("family_name", familyName);
 
-  if (error) {
-    console.error("Failed to save RSVP - details:", {
-      error: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint,
-      eventId,
-      playerId,
-      status,
-      familyName,
-      isTemp,
-    });
-    throw new Error("Failed to save RSVP");
+    const { error } = await supabase.from("rsvps").insert(
+      {
+        event_id: Number(eventId),
+        response: status,
+        family_name: familyName,
+        notes: note || null,
+      } as any
+    );
+
+    if (error) {
+      console.error("Schedule error (createRsvp insert):", error);
+      console.error("RSVP details:", { eventId, playerId, status, familyName, isTemp });
+      throw new Error(error.message || "Failed to save RSVP");
+    }
+
+    return { success: true };
+  } catch (e: any) {
+    console.error("Schedule error (createRsvp):", e);
+    throw e;
   }
-
-  return { success: true };
 }
 
 

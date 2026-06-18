@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { createRsvp } from "@/lib/actions";
 import type { Event } from "@/lib/supabase/types";
 import { createClient } from '@/lib/supabase/client';
 
@@ -75,6 +74,11 @@ export function FullCalendarWrapper({
   useEffect(() => {
     if (rosterPlayers) setRosterPlayersState(rosterPlayers);
   }, [rosterPlayers]);
+
+  // Sync RSVP counts from parent (e.g. initial load or retry). Note: after live RSVP we update locally.
+  useEffect(() => {
+    if (initialRsvpCounts) setRsvpCounts(initialRsvpCounts);
+  }, [initialRsvpCounts]);
 
   // Support controlled add dialog (for page's bottom "Add New Event" button) + internal fallback
   const [internalShowAddDialog, setInternalShowAddDialog] = useState(false);
@@ -150,6 +154,39 @@ export function FullCalendarWrapper({
       }
     } catch (e: any) {
       console.error("Schedule error (reloadEventsFromDb):", e);
+    }
+  }
+
+  // Reload RSVPs + recompute counts for a single event (used after RSVP click for real-time UI)
+  async function reloadRsvpsForEvent(eventId: number | string) {
+    try {
+      const supabase = createClient();
+      const { data: rsvps, error } = await (supabase as any)
+        .from("rsvps")
+        .select("*")
+        .eq("event_id", Number(eventId))
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Schedule error (reloadRsvpsForEvent):", error);
+        return;
+      }
+
+      const list = Array.isArray(rsvps) ? rsvps : [];
+      setRsvpsByEventState((prev) => ({ ...prev, [eventId]: list }));
+
+      // Recompute counts for this event only
+      const counts: { yes: number; no: number; maybe: number; total: number } = { yes: 0, no: 0, maybe: 0, total: 0 };
+      list.forEach((r: any) => {
+        const resp = r?.response as 'yes' | 'no' | 'maybe' | undefined;
+        if (resp === 'yes' || resp === 'no' || resp === 'maybe') {
+          counts[resp] = (counts[resp] || 0) + 1;
+          counts.total += 1;
+        }
+      });
+      setRsvpCounts((prev) => ({ ...prev, [eventId]: counts }));
+    } catch (e: any) {
+      console.error("Schedule error (reloadRsvpsForEvent):", e);
     }
   }
 
@@ -337,12 +374,40 @@ export function FullCalendarWrapper({
     }
   };
 
-  const handleRsvp = async (eventId: number | string, playerId: string, status: 'yes' | 'no' | 'maybe') => {
+  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no' | 'maybe') => {
+    const supabase = createClient();
     try {
-      await createRsvp(eventId, playerId, status);
+      const fam = familyName || 'Demo Family';
+
+      // Use delete + insert to achieve "upsert" semantics reliably (supports re-voting / changing answer)
+      // without depending on a unique constraint that may not be present in all DBs.
+      // Clear any prior response for this family + event.
+      await (supabase as any)
+        .from("rsvps")
+        .delete()
+        .eq("event_id", Number(eventId))
+        .eq("family_name", fam);
+
+      const { error } = await (supabase as any)
+        .from("rsvps")
+        .insert({
+          event_id: Number(eventId),
+          response: status,
+          family_name: fam,
+          notes: null,
+        } as any);
+
+      if (error) {
+        console.error("Schedule error (RSVP insert):", error);
+        throw new Error(error.message || "Failed to save RSVP");
+      }
+
       toast.success(`RSVP set to ${status.toUpperCase()}`);
-      router.refresh();
+
+      // Update UI immediately with fresh data from DB (real-time counts + list in modal)
+      await reloadRsvpsForEvent(eventId);
     } catch (e: any) {
+      console.error("Schedule error:", e);
       toast.error(e.message || "RSVP failed");
     }
   };
