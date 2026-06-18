@@ -1316,12 +1316,11 @@ export async function getMessages(
       throw new Error('demo-dm-short-circuit');
     }
 
-    // ULTRA MINIMAL safe columns (id, created_at, content etc) to prevent 400 on missing columns after table reset
-    const select = 'id, created_at, content';
-
+    // Use * for full features (reactions, pinned, media, sender etc). Ultra-safe wrapped in try.
+    // If columns missing, outer catch returns []
     let query = supabase
       .from('messages')
-      .select(select)
+      .select('*')
       .order('created_at', { ascending: true })
       .limit(limit);
 
