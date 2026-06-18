@@ -99,13 +99,18 @@ export default function ChatPage() {
     try {
       const { data: msgs, error: msgErr } = await supabase
         .from('messages')
-        .select('id, created_at, sender_id, content, is_pinned, reactions, media_url, media_type, updated_at, channel_type, recipient_id, is_deleted')
+        .select('*')
         .order('created_at', { ascending: true })
         .limit(150);
 
       if (msgErr) {
+        console.error('[Chat] Supabase SELECT * from messages FAILED:', {
+          message: msgErr.message,
+          code: msgErr.code,
+          details: msgErr.details,
+          hint: msgErr.hint,
+        });
         console.error("PAGE ERROR:", msgErr);
-        console.error('[Chat] messages direct select error:', msgErr);
         throw msgErr;
       }
 
@@ -171,21 +176,21 @@ export default function ChatPage() {
     loadData(true);
 
     // Realtime for new messages / updates / pins / reactions (stable with try)
+    // IMPORTANT: attach .on() callbacks BEFORE calling .subscribe()
     let channel: any = null;
     try {
-      channel = supabase
-        .channel('chat-messages')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'messages' },
-          (payload: any) => {
-            console.log('[Chat] realtime update received:', payload.eventType, 'for id:', payload.new?.id || payload.old?.id);
-            loadData(); // reload to get enriched data + pins
-          }
-        )
-        .subscribe((status: string) => {
-          console.log('[Chat] realtime subscription status:', status);
-        });
+      channel = supabase.channel('chat-messages');
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        (payload: any) => {
+          console.log('[Chat] realtime update received:', payload.eventType, 'for id:', payload.new?.id || payload.old?.id);
+          loadData(); // reload to get enriched data + pins
+        }
+      );
+      channel.subscribe((status: string) => {
+        console.log('[Chat] realtime subscription status:', status);
+      });
     } catch (rtErr: any) {
       console.error("PAGE ERROR:", rtErr);
       console.error('[Chat] realtime setup error (non fatal):', rtErr);
