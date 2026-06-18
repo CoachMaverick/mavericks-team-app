@@ -6,6 +6,8 @@ import { TeamLogo } from "@/components/TeamLogo";
 import { TeamBanner } from "@/components/TeamBanner";
 import { getTeamPaymentSummary, getEvents, getRoster, getMessages, getPinnedAnnouncements, getInvoices } from "@/lib/actions";
 
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardPage() {
   // All data fetched fresh on load (actions use noStore() + service role for temp/demo)
   const summary = await getTeamPaymentSummary().catch(() => ({

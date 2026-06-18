@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidateTag, unstable_noStore as noStore } from "next/cache";
 import { cookies } from "next/headers";
 import type { RsvpStatus } from "@/lib/supabase/types";
-import Stripe from "stripe";
 
 // Helper: under temp-coach (demo), use service role client so real DB data
 // is immediately readable/queryable even without matching RLS. 
@@ -994,6 +993,7 @@ export async function createStripeCheckout(
     return { url: null as any, demo: true };
   }
 
+  const { default: Stripe } = await import("stripe");
   const stripe = new Stripe(secretKey, {
     apiVersion: '2025-02-24.acacia',
   });
@@ -1050,6 +1050,7 @@ export async function confirmStripePayment(sessionId: string) {
     return { success: false, demo: true };
   }
 
+  const { default: Stripe } = await import("stripe");
   const stripe = new Stripe(secretKey, {
     apiVersion: '2025-02-24.acacia',
   });

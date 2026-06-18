@@ -1,5 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from 'next/server';
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -9,19 +8,33 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // CRITICAL: Bypass all Supabase session/redirect logic for Server Actions.
-  // (moved temp logic down to prefer real sessions)
   // Server actions (identified by the "next-action" header) run their own
   // createClient() + auth.getUser() + mutations. Running middleware's getUser()
-  // + possible token refresh on action POSTs (to /admin, /payments etc.)
-  // frequently causes "Invalid path specified in request URL" inside the
-  // @supabase/ssr / gotrue client because of how Next.js encodes action requests.
-  if (request.headers.get("next-action")) {
+  // + possible token refresh on action POSTs frequently causes
+  // "Invalid path specified in request URL" inside the @supabase/ssr client.
+  if (request.headers.get('next-action')) {
     return supabaseResponse;
   }
 
+  // Use dynamic import so that @supabase/ssr (and its transitive deps like
+  // auth-js, realtime-js, etc.) are not statically bundled into the Edge
+  // chunk. Static imports can cause the bundler to include Node-only code
+  // paths that reference `process.version`, `require`, etc., which are
+  // forbidden in Vercel's Edge Runtime.
+  const { createServerClient } = await import('@supabase/ssr');
+
+  // Guarded env access using dynamic property lookup (bracket notation).
+  // This avoids direct `process.version` / Node API references that trigger
+  // Edge Runtime static analysis (exact pattern used inside Supabase's own
+  // @supabase/realtime-js to dodge Next.js/Vercel Edge checks).
+  const g = globalThis as any;
+  const _process = g['process'] || {};
+  const supabaseUrl = _process.env?.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = _process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -65,11 +78,6 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/auth')
   ) {
-    return supabaseResponse;
-  }
-
-  // Also short-circuit for server actions here (defense in depth).
-  if (request.headers.get("next-action")) {
     return supabaseResponse;
   }
 

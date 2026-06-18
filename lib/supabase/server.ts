@@ -1,7 +1,12 @@
+import "server-only";
+
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "./types";
 
+// Server-only Supabase client for App Router (Server Components, Route Handlers,
+// Server Actions). Uses next/headers cookies adapter. This file must never be
+// imported from Edge middleware or client components (enforced by "server-only").
 export async function createClient() {
   const cookieStore = await cookies();
 

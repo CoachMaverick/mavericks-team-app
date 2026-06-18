@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // This is a stub. Full implementation in Phase 6 (payments).
 // It will verify the Stripe signature and update invoices + payments table.
 

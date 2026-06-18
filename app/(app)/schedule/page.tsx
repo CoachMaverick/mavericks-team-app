@@ -5,6 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getEvents, getRsvpCountsForEvents, getRsvpsForEvents, getRoster } from "@/lib/actions";
 import type { Event, Profile } from "@/lib/supabase/types";
 
+export const dynamic = 'force-dynamic';
+
 export default async function SchedulePage() {
   const supabase = await createClient();
 
