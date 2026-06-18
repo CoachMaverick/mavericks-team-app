@@ -36,6 +36,7 @@ export default async function SchedulePage() {
         isCoach = true;
       } else {
         const { data: { user } } = await supabase.auth.getUser().catch((e) => {
+          console.error("PAGE ERROR:", e);
           console.error('[Schedule] auth.getUser error:', e);
           return { data: { user: null } };
         });
@@ -48,12 +49,14 @@ export default async function SchedulePage() {
               .maybeSingle();
             isCoach = (prof as any)?.role === 'coach' || (prof as any)?.role === 'admin' || (prof as any)?.is_admin === true;
           } catch (profErr: any) {
+            console.error("PAGE ERROR:", profErr);
             console.error('[Schedule] profile query error:', profErr);
             isCoach = false;
           }
         }
       }
     } catch (authErr: any) {
+      console.error("PAGE ERROR:", authErr);
       console.error('[Schedule] auth/coach check failed:', authErr);
       isCoach = isTempCoach;
     }
@@ -67,6 +70,7 @@ export default async function SchedulePage() {
         .limit(100);
 
       if (error) {
+        console.error("PAGE ERROR:", error);
         console.error('[Schedule] events select error:', error);
         throw error;
       }
@@ -84,12 +88,14 @@ export default async function SchedulePage() {
           is_cancelled: e.is_cancelled ?? false,
         })) as SafeEvent[];
     } catch (evErr: any) {
+      console.error("PAGE ERROR:", evErr);
       console.error('[Schedule] events query failed:', evErr);
       events = [];
       hasError = true;
       errorMsg = 'Failed to load events.';
     }
   } catch (pageErr: any) {
+    console.error("PAGE ERROR:", pageErr);
     console.error('[Schedule] page fatal error:', pageErr);
     hasError = true;
     errorMsg = 'Something went wrong loading the schedule.';
@@ -99,10 +105,9 @@ export default async function SchedulePage() {
   return (
     <div className="space-y-6 p-4">
       {(hasError || events.length === 0) && (
-        <div className="p-4 border border-yellow-500 bg-yellow-50 text-yellow-800 rounded text-sm">
-          {hasError ? `Something went wrong: ${errorMsg}` : 'No events available.'}
-          {' '}
-          <button onClick={() => window.location.reload()} className="underline font-medium">Try Again</button>
+        <div className="p-4 border border-red-500 bg-red-50 text-red-800 rounded text-sm">
+          PAGE ERROR: Failed to load schedule data (see console).
+          <button onClick={() => window.location.reload()} className="underline font-medium ml-2">Try Again</button>
         </div>
       )}
 

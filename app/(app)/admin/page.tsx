@@ -41,11 +41,13 @@ export default function AdminPage() {
         .limit(100);
 
       if (error) {
+        console.error("PAGE ERROR:", error);
         console.error('[Admin] invoices select error:', error);
         throw error;
       }
       setInvoices((data || []) as SafeInvoice[]);
     } catch (e: any) {
+      console.error("PAGE ERROR:", e);
       console.error('[Admin] load invoices failed:', e);
       setLoadError('Could not load invoices.');
       setInvoices([]);
@@ -76,6 +78,7 @@ export default function AdminPage() {
       } as any);
 
       if (error) {
+        console.error("PAGE ERROR:", error);
         console.error('[Admin] create invoice error:', error);
         throw error;
       }
@@ -84,6 +87,7 @@ export default function AdminPage() {
       await load();
       router.refresh();
     } catch (e: any) {
+      console.error("PAGE ERROR:", e);
       console.error('[Admin] create failed:', e);
       toast.error('Create failed: ' + (e.message || 'unknown error'));
     }
@@ -97,8 +101,8 @@ export default function AdminPage() {
     <ErrorBoundary>
       <div className="space-y-6">
         {loadError && (
-          <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between">
-            <span>{loadError}</span>
+          <div className="p-4 bg-red-50 border border-red-500 text-red-800 rounded flex justify-between">
+            <span>PAGE ERROR: {loadError} (see console)</span>
             <button onClick={() => { setLoadError(null); load(); }} className="text-sm underline">Try Again</button>
           </div>
         )}

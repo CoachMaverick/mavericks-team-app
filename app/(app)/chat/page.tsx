@@ -45,6 +45,7 @@ export default function ChatPage() {
     // 1. Auth - separate try/catch
     try {
       const { data: { user } } = await supabase.auth.getUser().catch((e: any) => {
+        console.error("PAGE ERROR:", e);
         console.error('[Chat] auth.getUser error:', e);
         return { data: { user: null } };
       });
@@ -54,6 +55,7 @@ export default function ChatPage() {
       setCurrentUserId(uid);
       setIsCoach(coach);
     } catch (authErr: any) {
+      console.error("PAGE ERROR:", authErr);
       console.error('[Chat] auth block error:', authErr);
       uid = 'temp-coach-id';
       coach = true;
@@ -71,11 +73,13 @@ export default function ChatPage() {
         .limit(100);
 
       if (msgErr) {
+        console.error("PAGE ERROR:", msgErr);
         console.error('[Chat] messages select error:', msgErr);
         throw msgErr;
       }
       setMessages((msgs || []).filter(Boolean) as SafeMessage[]);
     } catch (msgErr: any) {
+      console.error("PAGE ERROR:", msgErr);
       console.error('[Chat] messages load failed:', msgErr);
       setMessages([]);
       setLoadError('Failed to load messages.');
@@ -91,11 +95,13 @@ export default function ChatPage() {
         .limit(5);
 
       if (annErr) {
+        console.error("PAGE ERROR:", annErr);
         console.error('[Chat] announcements select error:', annErr);
         throw annErr;
       }
       setPinned((anns || []) as SafeAnnouncement[]);
     } catch (annErr: any) {
+      console.error("PAGE ERROR:", annErr);
       console.error('[Chat] announcements load failed:', annErr);
       setPinned([]);
     }
@@ -130,12 +136,14 @@ export default function ChatPage() {
       } as any);
 
       if (error) {
+        console.error("PAGE ERROR:", error);
         console.error('[Chat] send insert error:', error);
         throw error;
       }
       // reload to get real rows
       await loadData();
     } catch (sendErr: any) {
+      console.error("PAGE ERROR:", sendErr);
       console.error('[Chat] send failed:', sendErr);
       toast.error('Failed to send message');
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -151,8 +159,8 @@ export default function ChatPage() {
     <ErrorBoundary>
       <div className="space-y-6">
         {loadError && (
-          <div className="p-4 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded flex justify-between items-center">
-            <span>{loadError}</span>
+          <div className="p-4 bg-red-50 border border-red-500 text-red-800 rounded flex justify-between items-center">
+            <span>PAGE ERROR: {loadError} (see console)</span>
             <button
               onClick={() => {
                 setLoadError(null);

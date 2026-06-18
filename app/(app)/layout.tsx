@@ -28,6 +28,7 @@ export default async function AppLayout({
     const { data: { user: u } } = await supabase.auth.getUser();
     realUser = u;
   } catch (e) {
+    console.error("PAGE ERROR:", e);
     console.warn('Supabase auth getUser failed in layout (missing config/tables?):', (e as any)?.message);
     realUser = null;
   }
@@ -45,6 +46,7 @@ export default async function AppLayout({
         .single();
       profile = realProfile;
     } catch (e) {
+      console.error("PAGE ERROR:", e);
       console.warn("Profile fetch failed in layout (missing table/columns?):", (e as any)?.message);
       profile = null;
     }
