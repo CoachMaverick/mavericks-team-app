@@ -238,8 +238,8 @@ export default function ChatPage() {
       const sender_id = isTemp ? null : currentUserId;
       const payload: any = {
         content: sentText || '',
-        sender_id,
-        channel_type: 'team',
+        sender_id,  // user_id from session (schema uses sender_id for messages)
+        channel_type: 'team',  // channel = 'team'
         recipient_id: null,
         created_at: new Date().toISOString(),
         reactions: {},
@@ -362,12 +362,20 @@ export default function ChatPage() {
       if (isTemp) {
         await editMessage(editingId, trimmed);
       } else {
+        console.log('[Chat] performing direct Supabase .update() for edit', { id: editingId, trimmed });
         const { error } = await (supabase as any)
           .from('messages')
           .update({ content: trimmed, updated_at: new Date().toISOString() })
           .filter('id::text', 'eq', editingId);
         if (error) {
-          console.error('[Chat] direct edit update error:', error);
+          console.error('[Chat] Supabase .update() FAILED for edit messages:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            id: editingId,
+            trimmed,
+          });
           throw error;
         }
       }
@@ -391,12 +399,19 @@ export default function ChatPage() {
       if (isTemp) {
         await deleteMessage(id);
       } else {
+        console.log('[Chat] performing direct Supabase .delete() for message', { id });
         const { error } = await (supabase as any)
           .from('messages')
-          .update({ is_deleted: true, updated_at: new Date().toISOString() })
+          .delete()
           .filter('id::text', 'eq', id);
         if (error) {
-          console.error('[Chat] direct delete update error:', error);
+          console.error('[Chat] Supabase .delete() FAILED for messages:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            id,
+          });
           throw error;
         }
       }
