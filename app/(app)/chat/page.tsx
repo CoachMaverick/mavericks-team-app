@@ -12,27 +12,18 @@ export default function ChatPage() {
 
   const supabase = createClient();
 
-  // Fetch current user with better error handling
+  // Fetch current user properly from Supabase auth
   const fetchUser = async () => {
     try {
-      const { data: { user }, error: authErr } = await supabase.auth.getUser().catch((e: any) => {
-        console.error('[Chat] auth.getUser error:', e);
-        return { data: { user: null }, error: e };
-      });
-      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
-      if (authErr && !isTemp) {
-        console.error('[Chat] Auth error:', authErr);
-      }
-      if (isTemp) {
-        setCurrentUser({ id: 'temp-coach-id' });
-      } else if (user) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
         setCurrentUser(user);
       } else {
         setCurrentUser(null);
         setError('Please log in to use chat');
       }
     } catch (err: any) {
-      console.error('[Chat] Unexpected auth error:', err);
+      console.error('[Chat] auth.getUser error:', err);
       setCurrentUser(null);
       setError('Authentication error. Please log in.');
     }
@@ -61,26 +52,11 @@ export default function ChatPage() {
     if (!newMessage.trim()) return;
 
     try {
-      // Ensure we have a user - fetch if not already set
-      let user = currentUser;
-      if (!user) {
-        const { data: { user: freshUser }, error: authErr } = await supabase.auth.getUser().catch((e: any) => {
-          console.error('[Chat] auth.getUser in send error:', e);
-          return { data: { user: null }, error: e };
-        });
-        const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
-        if (authErr && !isTemp) {
-          console.error('[Chat] Auth error during send:', authErr);
-        }
-        if (isTemp) {
-          user = { id: 'temp-coach-id' };
-        } else if (freshUser) {
-          user = freshUser;
-        } else {
-          setError('Please log in to send messages');
-          return;
-        }
-      }
+      // Always fetch fresh user to ensure auth is up to date
+      const { data: { user } } = await supabase.auth.getUser().catch((e: any) => {
+        console.error('[Chat] auth.getUser in send error:', e);
+        return { data: { user: null } };
+      });
 
       if (!user || !user.id) {
         setError('Please log in to send messages');
