@@ -8,8 +8,35 @@ export default function ChatPage() {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const supabase = createClient();
+
+  // Fetch current user with better error handling
+  const fetchUser = async () => {
+    try {
+      const { data: { user }, error: authErr } = await supabase.auth.getUser().catch((e: any) => {
+        console.error('[Chat] auth.getUser error:', e);
+        return { data: { user: null }, error: e };
+      });
+      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+      if (authErr && !isTemp) {
+        console.error('[Chat] Auth error:', authErr);
+      }
+      if (isTemp) {
+        setCurrentUser({ id: 'temp-coach-id' });
+      } else if (user) {
+        setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+        setError('Please log in to use chat');
+      }
+    } catch (err: any) {
+      console.error('[Chat] Unexpected auth error:', err);
+      setCurrentUser(null);
+      setError('Authentication error. Please log in.');
+    }
+  };
 
   const loadMessages = async () => {
     try {
@@ -34,8 +61,31 @@ export default function ChatPage() {
     if (!newMessage.trim()) return;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      // Ensure we have a user - fetch if not already set
+      let user = currentUser;
+      if (!user) {
+        const { data: { user: freshUser }, error: authErr } = await supabase.auth.getUser().catch((e: any) => {
+          console.error('[Chat] auth.getUser in send error:', e);
+          return { data: { user: null }, error: e };
+        });
+        const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+        if (authErr && !isTemp) {
+          console.error('[Chat] Auth error during send:', authErr);
+        }
+        if (isTemp) {
+          user = { id: 'temp-coach-id' };
+        } else if (freshUser) {
+          user = freshUser;
+        } else {
+          setError('Please log in to send messages');
+          return;
+        }
+      }
+
+      if (!user || !user.id) {
+        setError('Please log in to send messages');
+        return;
+      }
 
       const { error } = await supabase
         .from('messages')
@@ -56,6 +106,7 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
+    fetchUser();
     loadMessages();
   }, []);
 
@@ -64,6 +115,12 @@ export default function ChatPage() {
       <h1 className="text-3xl font-bold mb-6">Team Chat</h1>
       
       {error && <p className="text-red-400 mb-4">{error}</p>}
+
+      {!currentUser && !loading && (
+        <div className="mb-4 p-4 bg-yellow-900/30 border border-yellow-700 rounded text-yellow-300">
+          Please log in to use the chat.
+        </div>
+      )}
 
       <div className="bg-zinc-900 rounded-xl h-[600px] flex flex-col">
         <div className="flex-1 p-4 overflow-y-auto space-y-4">
@@ -90,12 +147,14 @@ export default function ChatPage() {
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 focus:outline-none"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 focus:outline-none disabled:opacity-50"
               placeholder="Type a message..."
+              disabled={!currentUser}
             />
             <button
               onClick={sendMessage}
-              className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-medium"
+              disabled={!currentUser || !newMessage.trim()}
+              className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Send
             </button>
