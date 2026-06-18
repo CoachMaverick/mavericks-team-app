@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { MessageCircle, Send, Paperclip, Smile, Edit2, Trash2, Pin, X } from 'lucide-react';
-import { getMessages, sendMessage, editMessage, deleteMessage, pinMessage, toggleMessageReaction } from '@/lib/actions';
+import { editMessage, deleteMessage, pinMessage, toggleMessageReaction } from '@/lib/actions';
 
 interface SafeMessage {
   id: string;
@@ -71,6 +71,7 @@ export default function ChatPage() {
 
     let uid = '';
     let coach = false;
+    let isTemp = false;
 
     // 1. Auth - separate try/catch
     try {
@@ -79,7 +80,7 @@ export default function ChatPage() {
         console.error('[Chat] auth.getUser error:', e);
         return { data: { user: null } };
       });
-      const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+      isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
       uid = user?.id || (isTemp ? 'temp-coach-id' : '');
       coach = isTemp || !!user?.email?.includes('coach');
       setCurrentUserId(uid);
@@ -89,35 +90,52 @@ export default function ChatPage() {
       console.error('[Chat] auth block error:', authErr);
       uid = 'temp-coach-id';
       coach = true;
+      isTemp = true;
       setCurrentUserId(uid);
       setIsCoach(true);
     }
 
-    // 2. Messages using action (supports reactions, pinned, media, full fields) with try/catch
+    // 2. Messages - direct Supabase select for stability (try/catch, broad but safe columns)
     try {
-      const msgs = await getMessages('team', null, 150).catch((e: any) => {
-        console.error("PAGE ERROR:", e);
-        console.error('[Chat] getMessages error:', e);
-        return [];
-      });
+      const { data: msgs, error: msgErr } = await supabase
+        .from('messages')
+        .select('id, created_at, sender_id, content, is_pinned, reactions, media_url, media_type, updated_at, channel_type, recipient_id, is_deleted')
+        .order('created_at', { ascending: true })
+        .limit(150);
+
+      if (msgErr) {
+        console.error("PAGE ERROR:", msgErr);
+        console.error('[Chat] messages direct select error:', msgErr);
+        throw msgErr;
+      }
+
       const safeMsgs = (msgs || []).filter((m: any) => m && (m.is_deleted === false || m.is_deleted == null || m.is_deleted === undefined)) as SafeMessage[];
 
       // Only team messages for chat (exclude DMs if any)
       const teamMsgs = safeMsgs.filter((m: any) => !m.channel_type || m.channel_type === 'team' || !m.recipient_id );
 
-      const pinned = teamMsgs.filter((m: SafeMessage) => m.is_pinned);
-      const regular = teamMsgs.filter((m: SafeMessage) => !m.is_pinned);
+      // Normalize sender_id for temp-coach so isOwn checks and display work (null in DB -> 'temp-coach-id')
+      const isTempForLoad = isTemp;
+      const normalizedMsgs = teamMsgs.map((m: any) => {
+        if (isTempForLoad && (!m.sender_id || m.sender_id === 'temp-coach-id')) {
+          return { ...m, sender_id: 'temp-coach-id' };
+        }
+        return m;
+      });
+
+      const pinned = normalizedMsgs.filter((m: SafeMessage) => m.is_pinned);
+      const regular = normalizedMsgs.filter((m: SafeMessage) => !m.is_pinned);
 
       setPinnedMessages(pinned);
       setMessages(regular);
 
-      console.log('[Chat] loadData messages:', { total: safeMsgs.length, team: teamMsgs.length, pinned: pinned.length, regular: regular.length });
+      console.log('[Chat] loadData messages (direct):', { total: safeMsgs.length, team: teamMsgs.length, pinned: pinned.length, regular: regular.length });
       if (teamMsgs.length === 0) {
-        console.error('[Chat] No messages returned from getMessages');
+        console.error('[Chat] No messages returned from direct select');
       }
     } catch (msgErr: any) {
       console.error("PAGE ERROR:", msgErr);
-      console.error('[Chat] messages load failed:', msgErr);
+      console.error('[Chat] messages load failed (direct):', msgErr);
       setMessages([]);
       setPinnedMessages([]);
       setLoadError('Failed to load messages.');
@@ -161,11 +179,13 @@ export default function ChatPage() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'messages' },
           (payload: any) => {
-            console.log('[Chat] realtime update');
+            console.log('[Chat] realtime update received:', payload.eventType, 'for id:', payload.new?.id || payload.old?.id);
             loadData(); // reload to get enriched data + pins
           }
         )
-        .subscribe();
+        .subscribe((status: string) => {
+          console.log('[Chat] realtime subscription status:', status);
+        });
     } catch (rtErr: any) {
       console.error("PAGE ERROR:", rtErr);
       console.error('[Chat] realtime setup error (non fatal):', rtErr);
@@ -188,9 +208,11 @@ export default function ChatPage() {
   const handleSend = async (mediaUrl?: string | null, mediaType?: string | null) => {
     const text = newMessage.trim();
     const hasMedia = !!mediaUrl;
-    console.log('[Chat] handleSend called', { text: !!text, hasMedia, currentUserId, isTemp: currentUserId === 'temp-coach-id' });
+    const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+    console.log('[Chat] handleSend called', { text: !!text, hasMedia, currentUserId, isTemp });
+
     if ((!text && !hasMedia) || !currentUserId) {
-      console.error('[Chat] send aborted: no text/media or no currentUserId');
+      console.error('[Chat] send aborted: no text/media or no currentUserId', { text, hasMedia, currentUserId });
       return;
     }
 
@@ -208,20 +230,46 @@ export default function ChatPage() {
     setNewMessage('');
 
     try {
-      console.log('[Chat] calling sendMessage action...');
-      await sendMessage(
-        sentText || '',
-        'team',
-        null,
-        mediaUrl || null,
-        mediaType || null
-      );
-      console.log('[Chat] sendMessage success, reloading...');
+      const sender_id = isTemp ? null : currentUserId;
+      const payload: any = {
+        content: sentText || '',
+        sender_id,
+        channel_type: 'team',
+        recipient_id: null,
+        created_at: new Date().toISOString(),
+        reactions: {},
+        is_pinned: false,
+        read_by: isTemp ? null : [currentUserId],
+      };
+      if (hasMedia && mediaUrl) {
+        payload.media_url = mediaUrl;
+        payload.media_type = mediaType || 'image/png';
+      }
+
+      console.log('[Chat] performing direct Supabase insert to messages table', { payload, isTemp });
+
+      const { error } = await supabase.from('messages').insert(payload);
+
+      if (error) {
+        console.error('[Chat] Supabase .insert() FAILED for messages:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          payload,
+        });
+        throw error;
+      }
+
+      console.log('[Chat] direct insert SUCCESS');
+      toast.success('Message sent');
+
+      // Reload to get real data + trigger any listeners; realtime should also fire
       await loadData();
       setTimeout(() => scrollToBottom(true), 100);
     } catch (sendErr: any) {
       console.error("PAGE ERROR:", sendErr);
-      console.error('[Chat] send failed:', sendErr);
+      console.error('[Chat] send failed with details:', sendErr);
       toast.error('Failed to send message');
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setNewMessage(sentText);
@@ -305,7 +353,20 @@ export default function ChatPage() {
     }
     console.log('[Chat] saveEdit', { id: editingId, trimmed });
     try {
-      await editMessage(editingId, trimmed);
+      const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      if (isTemp) {
+        await editMessage(editingId, trimmed);
+      } else {
+        const { error } = await (supabase as any)
+          .from('messages')
+          .update({ content: trimmed, updated_at: new Date().toISOString() })
+          .filter('id::text', 'eq', editingId);
+        if (error) {
+          console.error('[Chat] direct edit update error:', error);
+          throw error;
+        }
+      }
+      console.log('[Chat] edit success (direct or action)');
       toast.success('Message edited');
       setEditingId(null);
       setEditText('');
@@ -321,7 +382,20 @@ export default function ChatPage() {
     if (!confirm('Delete this message?')) return;
     console.log('[Chat] handleDelete', { id, isOwn, isCoach });
     try {
-      await deleteMessage(id);
+      const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      if (isTemp) {
+        await deleteMessage(id);
+      } else {
+        const { error } = await (supabase as any)
+          .from('messages')
+          .update({ is_deleted: true, updated_at: new Date().toISOString() })
+          .filter('id::text', 'eq', id);
+        if (error) {
+          console.error('[Chat] direct delete update error:', error);
+          throw error;
+        }
+      }
+      console.log('[Chat] delete success (direct or action)');
       toast.success('Message deleted');
       await loadData();
     } catch (e: any) {
@@ -334,7 +408,20 @@ export default function ChatPage() {
   const handlePin = async (id: string, pin: boolean) => {
     console.log('[Chat] handlePin', { id, pin, isCoach });
     try {
-      await pinMessage(id, pin);
+      const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      if (isTemp) {
+        await pinMessage(id, pin);
+      } else {
+        const { error } = await (supabase as any)
+          .from('messages')
+          .update({ is_pinned: pin })
+          .filter('id::text', 'eq', id);
+        if (error) {
+          console.error('[Chat] direct pin update error:', error);
+          throw error;
+        }
+      }
+      console.log('[Chat] pin success (direct or action)');
       toast.success(pin ? 'Message pinned' : 'Message unpinned');
       await loadData();
     } catch (e: any) {
@@ -368,9 +455,47 @@ export default function ChatPage() {
       setMessages(applyOptimistic);
       setPinnedMessages(applyOptimistic);
 
-      await toggleMessageReaction(id, emoji);
+      if (isTemp) {
+        // Temp/demo: no DB update (as per action design). Optimistic is sufficient.
+        console.log('[Chat] temp react - skipped DB, using optimistic only');
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated for reaction');
 
-      // For temp: rely on optimistic (no DB change). For real: reload to sync others
+        // Fetch current
+        const { data: row, error: fetchErr } = await (supabase as any)
+          .from('messages')
+          .select('reactions')
+          .filter('id::text', 'eq', id)
+          .single();
+
+        if (fetchErr) throw fetchErr;
+
+        let reactions: Record<string, string[]> = (row?.reactions as any) || {};
+        const users = reactions[emoji] ? [...reactions[emoji]] : [];
+        const idx = users.indexOf(user.id);
+
+        if (idx !== -1) {
+          users.splice(idx, 1);
+          if (users.length === 0) delete reactions[emoji];
+          else reactions[emoji] = users;
+        } else {
+          reactions[emoji] = [...users, user.id];
+        }
+
+        const { error: updateErr } = await (supabase as any)
+          .from('messages')
+          .update({ reactions })
+          .filter('id::text', 'eq', id);
+
+        if (updateErr) {
+          console.error('[Chat] direct reaction update error:', updateErr);
+          throw updateErr;
+        }
+        console.log('[Chat] direct reaction update success');
+      }
+
+      // reload for cross sync if not temp
       if (!isTemp) {
         setTimeout(() => loadData(), 300);
       }
