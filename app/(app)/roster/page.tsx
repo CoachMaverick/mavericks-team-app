@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -273,6 +274,7 @@ export default function RosterPage() {
   }
 
   return (
+    <ErrorBoundary>
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -450,5 +452,6 @@ export default function RosterPage() {
         <p className="text-center text-xs text-muted-foreground">Contact your coach to update player info or add new teammates.</p>
       )}
     </div>
+    </ErrorBoundary>
   );
 }

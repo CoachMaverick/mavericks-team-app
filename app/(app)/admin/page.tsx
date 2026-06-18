@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -157,6 +158,7 @@ export default function AdminPage() {
   };
 
   return (
+    <ErrorBoundary>
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight mb-2">Admin Panel</h1>
@@ -416,6 +418,7 @@ export default function AdminPage() {
         </CardContent>
       </Card>
     </div>
+    </ErrorBoundary>
   );
 }
 

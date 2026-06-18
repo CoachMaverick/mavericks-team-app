@@ -11,6 +11,11 @@ export default async function SchedulePage() {
   let user: any = null;
   let profile: Profile | null = null;
   let isTempCoach = false;
+  let events: Event[] = [];
+  let rsvpCounts: any = {};
+  let rsvpsByEvent: any = {};
+  let rosterPlayers: any[] = [];
+  let upcoming: any[] = [];
 
   try {
     const cookieStore = await cookies();
@@ -63,29 +68,29 @@ export default async function SchedulePage() {
         profile = null;
       }
     }
+
+    const isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
+
+    // Fetch events (via action for consistent temp-coach handling via service role)
+    events = await getEvents().catch(() => [] as Event[]);
+
+    const eventIds = events.map(e => e.id);
+    rsvpCounts = eventIds.length > 0 ? await getRsvpCountsForEvents(eventIds).catch(() => ({} as any)) : {};
+    rsvpsByEvent = eventIds.length > 0 ? await getRsvpsForEvents(eventIds).catch(() => ({} as any)) : {};
+    rosterPlayers = await getRoster().catch(() => [] as any[]);
+
+    // Simple upcoming list (sorted, limited)
+    upcoming = [...events]
+      .filter(e => !e.is_cancelled)
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+      .slice(0, 10);
+
   } catch (e: any) {
-    console.warn('Schedule auth/setup error (falling back gracefully):', e?.message);
-    // fallback to no-auth view
-    isTempCoach = false;
-    user = null;
-    profile = null;
+    console.warn('Schedule page error (falling back gracefully):', e?.message);
+    // All vars default to safe empty values defined above
   }
 
   const isCoach = profile?.role === "coach" || isTempCoach || profile?.role === "admin" || profile?.is_admin === true;
-
-  // Fetch events (via action for consistent temp-coach handling via service role)
-  const events: Event[] = await getEvents().catch(() => [] as Event[]);
-
-  const eventIds = events.map(e => e.id);
-  const rsvpCounts = eventIds.length > 0 ? await getRsvpCountsForEvents(eventIds).catch(() => ({} as any)) : {};
-  const rsvpsByEvent = eventIds.length > 0 ? await getRsvpsForEvents(eventIds).catch(() => ({} as any)) : {};
-  const rosterPlayers = await getRoster().catch(() => [] as any[]);
-
-  // Simple upcoming list (sorted, limited)
-  const upcoming = [...events]
-    .filter(e => !e.is_cancelled)
-    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-    .slice(0, 10);
 
   return (
     <div className="space-y-6">

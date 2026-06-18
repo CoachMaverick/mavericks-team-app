@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ export default function NotificationsPage() {
   const unread = notifications.filter(n => !n.is_read).length;
 
   return (
+    <ErrorBoundary>
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -125,5 +127,6 @@ export default function NotificationsPage() {
         In-app notifications for core events. Email support + full settings + realtime coming soon. (Mavericks styling)
       </p>
     </div>
+    </ErrorBoundary>
   );
 }

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, usePathname } from 'next/navigation';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import {
   getChatMembers,
   getMessages,
@@ -925,6 +926,7 @@ export default function ChatPage() {
   }
 
   return (
+    <ErrorBoundary>
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight mb-2 flex items-center gap-2">
@@ -1464,5 +1466,6 @@ export default function ChatPage() {
         Messages are realtime. Unread counts update on view. Coach can pin announcements above.
       </p>
     </div>
+    </ErrorBoundary>
   );
 }
