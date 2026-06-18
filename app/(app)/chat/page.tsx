@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,15 +43,15 @@ export default function ChatPage() {
           content: newMessage.trim(),
           user_id: user.id,
           channel: 'team',
-        });
+        } as any);
 
       if (error) throw error;
 
       setNewMessage('');
-      loadMessages(); // Refresh list
+      await loadMessages();
     } catch (err: any) {
       console.error('Send message error:', err);
-      alert('Failed to send message: ' + (err.message || err));
+      alert('Failed to send message: ' + (err.message || JSON.stringify(err)));
     }
   };
 
@@ -66,14 +66,17 @@ export default function ChatPage() {
       {error && <p className="text-red-400 mb-4">{error}</p>}
 
       <div className="bg-zinc-900 rounded-xl h-[600px] flex flex-col">
-        <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 p-4 overflow-y-auto space-y-4">
           {messages.length === 0 ? (
             <p className="text-center text-gray-400 mt-8">No messages yet. Start the conversation!</p>
           ) : (
             messages.map((msg: any) => (
-              <div key={msg.id} className="mb-4 flex justify-end">
+              <div key={msg.id} className="flex justify-end">
                 <div className="bg-zinc-800 p-3 rounded-lg max-w-[80%]">
-                  {msg.content}
+                  <p>{msg.content}</p>
+                  <small className="text-gray-500 text-xs block mt-1">
+                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </small>
                 </div>
               </div>
             ))
