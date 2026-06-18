@@ -1,14 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
-import { FullCalendarWrapper } from "@/components/schedule/FullCalendarWrapper";
-import { Card, CardContent } from "@/components/ui/card";
-import ErrorBoundary from "@/components/ErrorBoundary";
 
 export const dynamic = 'force-dynamic';
 
 export default async function SchedulePage() {
   let events: any[] = [];
-  let isCoach = false;
   let hasError = false;
 
   const cookieStore = await cookies();
@@ -17,32 +13,7 @@ export default async function SchedulePage() {
   try {
     const supabase = await createClient();
 
-    // simple coach detection
-    if (isTempCoach) {
-      isCoach = true;
-    } else {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          try {
-            const { data: prof } = await supabase
-              .from("profiles")
-              .select("*")
-              .eq("id", user.id)
-              .maybeSingle();
-            isCoach = (prof as any)?.role === 'coach' || (prof as any)?.role === 'admin' || (prof as any)?.is_admin === true;
-          } catch (e) {
-            console.error("Schedule error:", e);
-            isCoach = false;
-          }
-        }
-      } catch (e) {
-        console.error("Schedule error:", e);
-        isCoach = false;
-      }
-    }
-
-    // simple events .select('*')
+    // minimal events query
     try {
       const { data, error } = await supabase
         .from("events")
@@ -52,16 +23,12 @@ export default async function SchedulePage() {
         console.error("Schedule error:", error);
         throw error;
       }
-      events = (data || []).filter((e: any) => e && e.id && e.start_time);
+      events = data || [];
     } catch (e: any) {
       console.error("Schedule error:", e);
       events = [];
       hasError = true;
     }
-
-    // rsvps simple (not used for complex yet)
-    // (skipped for nuclear minimal to avoid any crash)
-
   } catch (e: any) {
     console.error("Schedule error:", e);
     events = [];
@@ -69,51 +36,38 @@ export default async function SchedulePage() {
   }
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold mb-4">Schedule</h1>
+
+      <button
+        className="mb-6 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        onClick={() => alert("Add Event coming soon")}
+      >
+        Add Event
+      </button>
+
       {hasError && (
-        <div className="p-4 border border-yellow-500 bg-yellow-50 text-yellow-800 rounded text-sm">
-          Schedule error loading data (see console).
-          <button onClick={() => window.location.reload()} className="underline ml-2">Try Again</button>
+        <div className="mb-4 p-3 bg-yellow-100 text-yellow-800 rounded">
+          Error loading events (see console). Showing empty list.
         </div>
       )}
 
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Schedule &amp; Calendar</h1>
-        <p className="text-muted-foreground">Practices, games, tournaments for Mavericks 12U</p>
-      </div>
-
-      {/* Always render calendar UI */}
-      <ErrorBoundary
-        fallback={
-          <div className="p-8 border rounded bg-muted text-center">
-            Calendar temporarily unavailable.
-            <button onClick={() => window.location.reload()} className="underline block mt-2">Try Again</button>
-          </div>
-        }
-      >
-        <FullCalendarWrapper
-          events={events}
-          isCoach={isCoach}
-          initialRsvpCounts={{}}
-          rsvpsByEvent={{}}
-          rosterPlayers={[]}
-        />
-      </ErrorBoundary>
-
-      {/* Simple Add Event button (calendar date click also adds when coach) */}
-      <div className="text-center">
-        <button
-          className="px-4 py-2 bg-primary text-primary-foreground rounded text-sm"
-          onClick={() => alert('Use calendar date click to add event (full modal coming back next)')}
-        >
-          Add Event
-        </button>
-        <p className="text-xs text-muted-foreground mt-1">(Click a date on the calendar above to add)</p>
-      </div>
-
-      <p className="text-center text-xs text-muted-foreground">
-        Nuclear minimal mode — page always renders.
-      </p>
+      {events.length === 0 ? (
+        <p className="text-gray-500">No events</p>
+      ) : (
+        <ul className="space-y-2">
+          {events.map((e: any) => (
+            <li key={e.id} className="p-3 border rounded">
+              <div className="font-semibold">{e.title || "Untitled"}</div>
+              <div className="text-sm text-gray-600">
+                {e.start_time ? new Date(e.start_time).toLocaleString() : "TBD"}
+                {e.location ? ` • ${e.location}` : ""}
+              </div>
+              {e.description && <div className="text-sm mt-1">{e.description}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
