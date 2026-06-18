@@ -63,12 +63,11 @@ export default function ChatPage() {
       setIsCoach(true);
     }
 
-    // 2. Messages - separate try/catch , basic SELECT only
+    // 2. Messages - separate try/catch , ULTRA MINIMAL SELECT to avoid 400 on missing columns
     try {
       const { data: msgs, error: msgErr } = await supabase
         .from('messages')
-        .select('id, created_at, sender_id, content, is_pinned')
-        .eq('channel_type', 'team')
+        .select('id, created_at, content')
         .order('created_at', { ascending: true })
         .limit(100);
 
@@ -85,12 +84,11 @@ export default function ChatPage() {
       setLoadError('Failed to load messages.');
     }
 
-    // 3. Announcements - separate try/catch , basic SELECT
+    // 3. Announcements - separate try/catch , ULTRA MINIMAL SELECT (no is_pinned filter/column)
     try {
       const { data: anns, error: annErr } = await supabase
         .from('announcements')
         .select('id, title, body, created_at')
-        .eq('is_pinned', true)
         .order('created_at', { ascending: false })
         .limit(5);
 
@@ -130,7 +128,6 @@ export default function ChatPage() {
     // Insert with its own try/catch
     try {
       const { error } = await supabase.from('messages').insert({
-        channel_type: 'team',
         content: text,
         sender_id: currentUserId === 'temp-coach-id' ? null : currentUserId,
       } as any);

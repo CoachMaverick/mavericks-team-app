@@ -11,12 +11,10 @@ import { toast } from "sonner";
 
 interface SafeInvoice {
   id: string;
-  family_id?: string | null;
   amount_cents: number;
   due_date: string;
   status?: string | null;
   description?: string | null;
-  due_type?: string | null;
 }
 
 export default function AdminPage() {
@@ -32,11 +30,11 @@ export default function AdminPage() {
     setLoading(true);
     setLoadError(null);
 
-    // Basic SELECT - try/catch ONLY this call
+    // Basic SELECT - try/catch ONLY this call. Use ONLY simple guaranteed columns to prevent 400.
     try {
       const { data, error } = await supabase
         .from('invoices')
-        .select('id, family_id, amount_cents, due_date, status, description, due_type')
+        .select('id, amount_cents, due_date, status, description')
         .order('due_date', { ascending: true })
         .limit(100);
 
@@ -74,7 +72,6 @@ export default function AdminPage() {
         description: newInvoice.desc,
         due_date: newInvoice.due,
         status: 'pending',
-        due_type: 'special',
       } as any);
 
       if (error) {
