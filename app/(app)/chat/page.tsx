@@ -65,8 +65,8 @@ export default function ChatPage() {
     }
   };
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     setLoadError(null);
 
     let uid = '';
@@ -100,15 +100,19 @@ export default function ChatPage() {
         console.error('[Chat] getMessages error:', e);
         return [];
       });
-      const safeMsgs = (msgs || []).filter(Boolean) as SafeMessage[];
+      const safeMsgs = (msgs || []).filter((m: any) => m && (m.is_deleted === false || m.is_deleted == null || m.is_deleted === undefined)) as SafeMessage[];
 
-      const pinned = safeMsgs.filter((m: SafeMessage) => m.is_pinned);
-      const regular = safeMsgs.filter((m: SafeMessage) => !m.is_pinned);
+      // Only team messages for chat (exclude DMs if any)
+      const teamMsgs = safeMsgs.filter((m: any) => !m.channel_type || m.channel_type === 'team' || !m.recipient_id );
+
+      const pinned = teamMsgs.filter((m: SafeMessage) => m.is_pinned);
+      const regular = teamMsgs.filter((m: SafeMessage) => !m.is_pinned);
 
       setPinnedMessages(pinned);
       setMessages(regular);
 
-      if (safeMsgs.length === 0) {
+      console.log('[Chat] loadData messages:', { total: safeMsgs.length, team: teamMsgs.length, pinned: pinned.length, regular: regular.length });
+      if (teamMsgs.length === 0) {
         console.error('[Chat] No messages returned from getMessages');
       }
     } catch (msgErr: any) {
@@ -146,7 +150,7 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(true);
 
     // Realtime for new messages / updates / pins / reactions (stable with try)
     let channel: any = null;
@@ -184,7 +188,11 @@ export default function ChatPage() {
   const handleSend = async (mediaUrl?: string | null, mediaType?: string | null) => {
     const text = newMessage.trim();
     const hasMedia = !!mediaUrl;
-    if ((!text && !hasMedia) || !currentUserId) return;
+    console.log('[Chat] handleSend called', { text: !!text, hasMedia, currentUserId, isTemp: currentUserId === 'temp-coach-id' });
+    if ((!text && !hasMedia) || !currentUserId) {
+      console.error('[Chat] send aborted: no text/media or no currentUserId');
+      return;
+    }
 
     const tempId = 'temp-' + Date.now();
     const temp: SafeMessage = {
@@ -200,6 +208,7 @@ export default function ChatPage() {
     setNewMessage('');
 
     try {
+      console.log('[Chat] calling sendMessage action...');
       await sendMessage(
         sentText || '',
         'team',
@@ -207,6 +216,7 @@ export default function ChatPage() {
         mediaUrl || null,
         mediaType || null
       );
+      console.log('[Chat] sendMessage success, reloading...');
       await loadData();
       setTimeout(() => scrollToBottom(true), 100);
     } catch (sendErr: any) {
@@ -256,7 +266,7 @@ export default function ChatPage() {
     }
     const url = await uploadImage(file);
     if (url) {
-      await handleSend(newMessage.trim() || '', 'image');
+      await handleSend(url, 'image');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -271,7 +281,7 @@ export default function ChatPage() {
         if (file) {
           const url = await uploadImage(file);
           if (url) {
-            await handleSend(newMessage.trim() || ' ', 'image');
+            await handleSend(url, 'image');
           }
         }
         return;
@@ -293,6 +303,7 @@ export default function ChatPage() {
       setEditingId(null);
       return;
     }
+    console.log('[Chat] saveEdit', { id: editingId, trimmed });
     try {
       await editMessage(editingId, trimmed);
       toast.success('Message edited');
@@ -308,6 +319,7 @@ export default function ChatPage() {
 
   const handleDelete = async (id: string, isOwn: boolean) => {
     if (!confirm('Delete this message?')) return;
+    console.log('[Chat] handleDelete', { id, isOwn, isCoach });
     try {
       await deleteMessage(id);
       toast.success('Message deleted');
@@ -320,6 +332,7 @@ export default function ChatPage() {
   };
 
   const handlePin = async (id: string, pin: boolean) => {
+    console.log('[Chat] handlePin', { id, pin, isCoach });
     try {
       await pinMessage(id, pin);
       toast.success(pin ? 'Message pinned' : 'Message unpinned');
@@ -333,26 +346,34 @@ export default function ChatPage() {
 
   const handleReact = async (id: string, emoji: string) => {
     try {
-      // Optimistic update for smooth UX
-      setMessages((prev) =>
-        prev.map((m) => {
-          if (m.id !== id) return m;
-          const reacts = { ...(m.reactions || {}) };
-          const users = reacts[emoji] ? [...reacts[emoji]] : [];
-          const has = users.includes(currentUserId);
-          if (has) {
-            const next = users.filter((u) => u !== currentUserId);
-            if (next.length === 0) delete reacts[emoji];
-            else reacts[emoji] = next;
-          } else {
-            reacts[emoji] = [...users, currentUserId];
-          }
-          return { ...m, reactions: reacts };
-        })
-      );
+      const isTemp = currentUserId === 'temp-coach-id' || (typeof document !== 'undefined' && document.cookie.includes('temp-coach=1'));
+      console.log('[Chat] handleReact', { id, emoji, isTemp, currentUserId });
+
+      // Optimistic update for smooth UX -- update BOTH lists
+      const applyOptimistic = (prev: SafeMessage[]) => prev.map((m) => {
+        if (m.id !== id) return m;
+        const reacts = { ...(m.reactions || {}) };
+        const users = reacts[emoji] ? [...reacts[emoji]] : [];
+        const has = users.includes(currentUserId);
+        if (has) {
+          const next = users.filter((u) => u !== currentUserId);
+          if (next.length === 0) delete reacts[emoji];
+          else reacts[emoji] = next;
+        } else {
+          reacts[emoji] = [...users, currentUserId];
+        }
+        return { ...m, reactions: reacts };
+      });
+
+      setMessages(applyOptimistic);
+      setPinnedMessages(applyOptimistic);
+
       await toggleMessageReaction(id, emoji);
-      // reload for cross-user sync
-      setTimeout(() => loadData(), 300);
+
+      // For temp: rely on optimistic (no DB change). For real: reload to sync others
+      if (!isTemp) {
+        setTimeout(() => loadData(), 300);
+      }
     } catch (e: any) {
       console.error("PAGE ERROR:", e);
       console.error('[Chat] react failed:', e);

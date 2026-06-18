@@ -654,7 +654,10 @@ export async function pinMessage(messageId: string, isPinned: boolean) {
         .from('messages')
         .update({ is_pinned: isPinned })
         .filter('id::text', 'eq', messageId);
-      if (error) throw new Error(error.message || 'Failed to pin/unpin message');
+      if (error) {
+        console.error('[pinMessage temp] update error:', error);
+        throw new Error(error.message || 'Failed to pin/unpin message');
+      }
     }
     revalidateTag('messages');
     return { success: true };
@@ -690,7 +693,10 @@ export async function pinMessage(messageId: string, isPinned: boolean) {
     .update({ is_pinned: isPinned })
     .filter('id::text', 'eq', messageId);
 
-  if (error) throw new Error(error.message || 'Failed to pin message');
+  if (error) {
+    console.error('[pinMessage] update error:', error);
+    throw new Error(error.message || 'Failed to pin message');
+  }
 
   revalidateTag('messages');
   return { success: true };
@@ -793,7 +799,10 @@ export async function deleteMessage(messageId: string) {
         .from('messages')
         .update({ is_deleted: true, updated_at: new Date().toISOString() } as any)
         .filter('id::text', 'eq', messageId);
-      if (error) throw new Error(error.message || 'Failed to delete message');
+      if (error) {
+        console.error('[deleteMessage temp] update error:', error);
+        throw new Error(error.message || 'Failed to delete message');
+      }
     }
     revalidateTag('messages');
     return { success: true };
@@ -840,7 +849,10 @@ export async function deleteMessage(messageId: string) {
     .update({ is_deleted: true, updated_at: new Date().toISOString() } as any)
     .filter('id::text', 'eq', messageId);
 
-  if (error) throw new Error(error.message || 'Failed to delete message');
+  if (error) {
+    console.error('[deleteMessage] update error:', error);
+    throw new Error(error.message || 'Failed to delete message');
+  }
 
   revalidateTag('messages');
   return { success: true };
@@ -1316,11 +1328,11 @@ export async function getMessages(
       throw new Error('demo-dm-short-circuit');
     }
 
-    // Use * for full features (reactions, pinned, media, sender etc). Ultra-safe wrapped in try.
-    // If columns missing, outer catch returns []
+    // Explicit columns for full features support (reactions, pinned, media etc). Avoids 400 on missing cols.
+    const select = 'id, created_at, content, sender_id, reactions, is_pinned, media_url, media_type, updated_at, channel_type, recipient_id, is_deleted';
     let query = supabase
       .from('messages')
-      .select('*')
+      .select(select)
       .order('created_at', { ascending: true })
       .limit(limit);
 
@@ -1341,7 +1353,7 @@ export async function getMessages(
     if (error) throw error;
 
     let senderMap: Record<string, any> = {};
-    const rows = (data || []);
+    const rows = (data || []).filter((m: any) => m.is_deleted !== true );
     if (!isTempForGet && rows.length > 0) {
       // Minimal safe secondary lookup for real users (only ids, no join in main query)
       try {
@@ -1383,7 +1395,8 @@ export async function getMessages(
     return enriched;
   } catch (e: any) {
     if (!String(e?.message || '').includes('demo-dm-short-circuit')) {
-      console.warn('[getMessages] error (returning empty):', e?.message);
+      console.error('[getMessages] error (returning empty):', e?.message);
+      console.error('PAGE ERROR:', e);
     }
     return [];
   }
@@ -1436,7 +1449,10 @@ export async function sendMessage(
     is_pinned: false,
   } as any).select().limit(1);
 
-  if (error) throw new Error(error.message || 'Failed to send message');
+  if (error) {
+    console.error('[sendMessage] insert error:', error);
+    throw new Error(error.message || 'Failed to send message');
+  }
 
   revalidateTag('messages');
 
@@ -1519,7 +1535,10 @@ export async function toggleMessageReaction(messageId: string, emoji: string) {
     .update({ reactions })
     .filter('id::text', 'eq', messageId);
 
-  if (updateErr) throw new Error(updateErr.message || 'Failed to update reaction');
+  if (updateErr) {
+    console.error('[toggleMessageReaction] update error:', updateErr);
+    throw new Error(updateErr.message || 'Failed to update reaction');
+  }
 
   revalidateTag('messages');
   return { success: true };
