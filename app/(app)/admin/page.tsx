@@ -755,12 +755,19 @@ function DuesList({ dataVersion = 0, onRefresh, tempSessionInvoices = [], onUpda
     }
     await revalidateInvoiceCache().catch(() => {});
     try {
-      const [invData, famData, payMap] = await Promise.all([
+      const [invDataRaw, famData, payMap] = await Promise.all([
         getInvoices().catch(() => []), 
         getFamilies().catch(() => []), 
         getInvoicePaymentsMap().catch(() => ({}))
       ]);
-      setInvoices(Array.isArray(invData) ? invData : []);
+      const famMap: Record<string, any> = {};
+      (Array.isArray(famData) ? famData : []).forEach((f: any) => { if (f?.id) famMap[f.id] = f; });
+      const invData = (Array.isArray(invDataRaw) ? invDataRaw : []).map((inv: any) => ({
+        ...inv,
+        // attach minimal family from separate safe load (no join in invoice query)
+        family: inv.family || famMap[inv.family_id] || { name: inv.family_id ? 'Family ' + String(inv.family_id).slice(0,6) : 'Unknown' }
+      }));
+      setInvoices(invData);
       setFamilies(Array.isArray(famData) ? famData : []);
       setPaymentsMap(payMap || {});
     } catch (e: any) {

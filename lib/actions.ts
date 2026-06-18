@@ -226,9 +226,10 @@ export async function getEvents(options?: { upcomingOnly?: boolean; limit?: numb
   try {
     const supabase = await getSupabaseForReadWrite();
 
+    // Minimal explicit columns (safe after table reset)
     let query = supabase
       .from("events")
-      .select("*")
+      .select("id, title, type, start_time, end_time, location, opponent, description, is_cancelled, created_at")
       .order("start_time", { ascending: true });
 
     if (options?.upcomingOnly) {
@@ -382,19 +383,31 @@ export async function getRoster() {
 
   const supabase = await getSupabaseForReadWrite();
   try {
-    const { data, error } = await supabase
+    // Minimal safe query post table reset: basic player fields + simple family name (no deep profile join to avoid FK/RLS issues when tables empty)
+    const { data: playersData, error: pErr } = await supabase
       .from('players')
-      .select(`
-        *,
-        family:families(
-          *,
-          primary_parent:profiles(first_name, last_name, phone, email)
-        )
-      `)
+      .select('id, family_id, first_name, last_name, jersey_number, position, date_of_birth, notes, is_active, created_at')
       .eq('is_active', true)
       .order('last_name', { ascending: true });
-    if (error) throw error;
-    return (data || []) as any[];
+    if (pErr) throw pErr;
+
+    const playerList = (playersData || []) as any[];
+
+    // Safe minimal families fetch (only if players exist)
+    const familyIds = Array.from(new Set(playerList.map((p: any) => p.family_id).filter(Boolean)));
+    let familiesMap: Record<string, any> = {};
+    if (familyIds.length > 0) {
+      const { data: famData } = await supabase
+        .from('families')
+        .select('id, name, email, phone, parent_names')
+        .in('id', familyIds);
+      (famData || []).forEach((f: any) => { if (f?.id) familiesMap[f.id] = f; });
+    }
+
+    return playerList.map((p: any) => ({
+      ...p,
+      family: familiesMap[p.family_id] || { id: p.family_id, name: 'Unassigned' }
+    })) as any[];
   } catch {
     if (isTemp) {
       // Rich demo data with contacts for temp/roster testing
@@ -418,7 +431,7 @@ export async function getRoster() {
         },
       ] as any;
     }
-    // For real users with missing tables/columns, return empty so dashboard can show "0 players"
+    // For real users post table reset / missing data, return empty
     return [] as any[];
   }
 }
@@ -792,8 +805,9 @@ export async function getInvoices(familyId?: string) {
   console.log('[getInvoices] called fresh (noStore) familyId=', familyId);
   const supabase = await getSupabaseForReadWrite();
   try {
+    // Minimal safe query: no joins (post-reset safety). Family name resolved client-side if needed via separate families load.
     let query = supabase.from('invoices')
-      .select('*, family:families(name), player:players(first_name, last_name)')
+      .select('id, family_id, amount_cents, due_date, status, description, due_type, notes, created_at, updated_at')
       .order('due_date', { ascending: true });
     if (familyId) {
       query = query.eq('family_id', familyId);
@@ -866,7 +880,7 @@ export async function createStripeCheckout(
   try {
     const { data, error } = await supabase
       .from('invoices')
-      .select('*, family:families(name, primary_parent_id), player:players(first_name, last_name)')
+      .select('id, family_id, amount_cents, due_date, status, description, due_type, notes')
       .eq('id', invoiceId)
       .single();
     if (error) {
@@ -1248,11 +1262,8 @@ export async function getMessages(
       throw new Error('demo-dm-short-circuit');
     }
 
-    // For temp/demo (with string sender_ids like 'temp-coach-id'), avoid the embedded sender join entirely.
-    // The join can trigger "invalid input syntax for type uuid" because profiles.id is uuid while sender_id may be non-uuid text.
-    // We attach a synthetic sender for temp-coach in enrichment instead. Real users get the join.
-    const useSenderJoin = !isTempForGet;
-    const select = useSenderJoin ? '*, sender:profiles(id, first_name, last_name, role)' : '*';
+    // Minimal safe columns only (post table reset): avoid broad * and risky joins for profiles (use synthetic for display)
+    const select = 'id, created_at, sender_id, channel_type, recipient_id, content, read_by, media_url, media_type, reactions, is_pinned, updated_at, is_deleted';
 
     let query = supabase
       .from('messages')
@@ -1281,16 +1292,27 @@ export async function getMessages(
     const { data, error } = await query;
     if (error) throw error;
 
+    let senderMap: Record<string, any> = {};
+    const rows = (data || []);
+    if (!isTempForGet && rows.length > 0) {
+      // Minimal safe secondary lookup for real users (only ids, no join in main query)
+      try {
+        const senderIds = Array.from(new Set(rows.map((m: any) => m.sender_id).filter((id: any) => id && !id.includes('temp'))));
+        if (senderIds.length) {
+          const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name, role').in('id', senderIds);
+          (profs || []).forEach((p: any) => { if (p?.id) senderMap[p.id] = p; });
+        }
+      } catch {}
+    }
+
     // Reactions now live directly on the message row as JSONB (simple object shape)
     // Also include is_pinned for pinned messages.
-    // For temp coach: normalize sender_id/read_by/sender to the TEXT string 'temp-coach-id'
-    // (even if DB stored null to avoid uuid cast on insert). This makes new messages appear
-    // reliably with correct isMine, sender display, etc.
-    const enriched = (data || []).map((m: any) => {
+    // For temp coach: normalize ... Real users get light sender from secondary lookup.
+    const enriched = rows.map((m: any) => {
       const isTempSender = isTempForGet && (!m.sender_id || m.sender_id === 'temp-coach-id');
       const sender_id = isTempSender ? 'temp-coach-id' : m.sender_id;
 
-      let sender = m.sender || null;
+      let sender = m.sender || (senderMap[sender_id] || null);
       if (isTempSender && !sender) {
         sender = { id: 'temp-coach-id', first_name: 'Coach', last_name: 'Maverick', role: 'coach' };
       }
@@ -1498,7 +1520,7 @@ export async function getPinnedAnnouncements() {
   // Use privileged client for temp-coach so newly created announcements (via service) are immediately visible
   const supabase = await getSupabaseForReadWrite();
   try {
-    // Safe select (avoid join errors for temp/service or null created_by); creator join optional for real users
+    // Minimal safe columns post-reset
     const { data, error } = await supabase
       .from('announcements')
       .select('id, title, body, is_pinned, created_at, created_by')
