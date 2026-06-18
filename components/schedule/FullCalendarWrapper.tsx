@@ -417,6 +417,57 @@ export function FullCalendarWrapper({
     }
   };
 
+  // Subscribe to full team calendar (public .ics feed)
+  const subscribeToCalendar = () => {
+    try {
+      const origin = (typeof window !== "undefined" ? window.location.origin : "");
+      const url = `${origin}/api/calendar/ics`;
+
+      // Copy link for subscription (works in Apple Calendar, Google, Outlook etc.)
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(url)
+          .then(() => {
+            toast.success("Subscription link copied! Add it in your calendar app to stay up to date.");
+          })
+          .catch(() => {
+            // Fallback for older browsers
+            prompt("Copy this link to subscribe to Mavericks calendar:", url);
+          });
+      } else {
+        prompt("Copy this link to subscribe to Mavericks calendar:", url);
+      }
+
+      // Also open the feed (triggers download in many clients / browsers)
+      window.open(url, "_blank");
+    } catch (e: any) {
+      console.error("Schedule error (subscribe calendar):", e);
+      toast.error("Could not prepare calendar subscription");
+    }
+  };
+
+  // Improved map link: Apple Maps on iOS, Google otherwise
+  const openInMaps = (location: string | null | undefined) => {
+    try {
+      if (!location) return;
+      const q = encodeURIComponent(location.trim());
+      const ua = (typeof navigator !== "undefined" ? navigator.userAgent : "");
+      const isIOS = /iPhone|iPad|iPod/i.test(ua);
+      const mapsUrl = isIOS
+        ? `https://maps.apple.com/?q=${q}`
+        : `https://www.google.com/maps/search/?api=1&query=${q}`;
+      window.open(mapsUrl, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      console.error("Schedule error (open maps):", e);
+      // graceful fallback
+      try {
+        if (location) {
+          const q = encodeURIComponent(location);
+          window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
+        }
+      } catch {}
+    }
+  };
+
   return (
     <>
       <div className="rounded-xl border bg-card p-2 shadow-sm">
@@ -530,6 +581,28 @@ export function FullCalendarWrapper({
                 <div className="text-[10px] text-center text-muted-foreground mt-1.5">
                   {isCoach ? "Coach view: see full list above" : "Your response updates counts & list"}
                 </div>
+              </div>
+
+              {/* Calendar subscription + Maps - always visible, placed near action buttons */}
+              <div className="flex gap-2 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={subscribeToCalendar}
+                  className="flex-1 text-xs"
+                >
+                  📅 Subscribe to Calendar
+                </Button>
+                {selectedEvent.location && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openInMaps(selectedEvent.location)}
+                    className="flex-1 text-xs"
+                  >
+                    🗺️ Open in Maps
+                  </Button>
+                )}
               </div>
 
               <div className="flex gap-2 pt-4">

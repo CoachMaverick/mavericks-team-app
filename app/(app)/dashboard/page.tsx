@@ -276,6 +276,18 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
+      {/* Optional: prominent calendar subscription link (public ICS feed) */}
+      <div className="text-center pt-2">
+        <a
+          href="/api/calendar/ics"
+          target="_blank"
+          rel="noopener"
+          className="text-[10px] underline text-muted-foreground hover:text-foreground"
+        >
+          📅 Subscribe to full team calendar (.ics feed)
+        </a>
+      </div>
+
       <div className="text-center text-[10px] text-muted-foreground pt-4 border-t">
         Fresh data • Click any widget to navigate • Mavericks 12U (Black &amp; Red)
       </div>
