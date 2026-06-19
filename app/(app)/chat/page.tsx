@@ -24,10 +24,19 @@ export default function ChatPage() {
             .select('role, is_admin')
             .eq('id', user.id)
             .single();
-          const coach = profile && (profile.role === 'coach' || profile.role === 'admin' || profile.is_admin === true);
+          let coach = profile && (profile.role === 'coach' || profile.role === 'admin' || profile.is_admin === true);
+          // Force admin/coach for the designated coach email as fallback
+          if (user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+            coach = true;
+          }
           setIsCoach(!!coach);
         } catch (e) {
-          setIsCoach(false);
+          // Fallback for the coach email even on profile fetch error
+          if (user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+            setIsCoach(true);
+          } else {
+            setIsCoach(false);
+          }
         }
       }
 

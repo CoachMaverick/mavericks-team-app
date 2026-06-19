@@ -51,6 +51,16 @@ export default async function AppLayout({
       profile = null;
     }
 
+    // Force admin rights for the coach email as fallback (even if profile.is_admin is missing/false)
+    if (realUser && realUser.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+      if (!profile) {
+        profile = { role: "admin", is_admin: true };
+      } else {
+        profile.role = "admin";
+        profile.is_admin = true;
+      }
+    }
+
     // When real admin (is_admin=true) detected, we do not use temp bypass.
   } else if (isTempCoachCookie) {
     // Pure fallback for testing when no real Supabase session

@@ -56,6 +56,13 @@ export default function LoginPage() {
         // Real login succeeded. Fetch profile to prioritize is_admin = true
         document.cookie = "temp-coach=; path=/; max-age=0";
 
+        // Explicitly refresh the user session
+        try {
+          await supabase.auth.refreshSession();
+        } catch (e) {
+          console.warn("Session refresh after login (non-fatal):", e);
+        }
+
         let isAdmin = false;
         try {
           const { data: profileData } = await supabase
@@ -66,6 +73,11 @@ export default function LoginPage() {
           isAdmin = profileData?.is_admin === true || profileData?.role === 'admin';
         } catch (e) {
           // profile may not exist yet; treat login as success (layout will set)
+        }
+
+        // Force admin for the coach email even if profile not yet updated
+        if (data.user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+          isAdmin = true;
         }
 
         toast.success(isAdmin ? "✅ Logged in as Admin" : "Logged in");
