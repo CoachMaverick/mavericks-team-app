@@ -32,8 +32,9 @@ export async function createRsvp(eventId: number | string, playerId: string, sta
 
     const supabase = isTemp ? await getSupabaseForReadWrite() : await createClient();
 
-    // Use simple demo family name for temp coach to match simplified schema
-    const familyName = isTemp ? "Demo Family" : (playerId || "Unknown Family");
+    // Use provided or fallback family name (real users should pass actual family name from roster/profile)
+    let familyName = playerId || "Unknown Family";
+    if (isTemp) familyName = "Demo Family"; // legacy temp default; prefer real name passed in
 
     // Delete-then-insert = robust upsert (handles vote changes, avoids dup rows)
     // even when table has no (event_id, family_name) unique constraint yet.

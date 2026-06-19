@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Calendar, MessageCircle, CreditCard, Users } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { TeamBanner } from "@/components/TeamBanner";
-import { getTeamPaymentSummary, getEvents, getRoster, getMessages, getPinnedAnnouncements, getInvoices, getRsvpCountsForEvents } from "@/lib/actions";
+import { getTeamPaymentSummary, getEvents, getRoster, getMessages, getPinnedAnnouncements, getInvoices, getRsvpCountsForEvents, getRsvpsForEvents } from "@/lib/actions";
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +24,7 @@ export default async function DashboardPage() {
   let recentMsgs: any[] = [];
   let pinnedAnns: any[] = [];
   let rsvpCountsForUpcoming: Record<number | string, { yes: number; no: number; maybe: number; total: number }> = {};
+  let rsvpsForUpcoming: Record<number | string, any[]> = {};
 
   try {
     summary = await getTeamPaymentSummary().catch(() => ({
@@ -40,6 +41,9 @@ export default async function DashboardPage() {
     const upcomingIds = Array.isArray(upcomingEventsRaw) ? upcomingEventsRaw.map((e: any) => e?.id).filter(Boolean) : [];
     rsvpCountsForUpcoming = upcomingIds.length > 0
       ? await getRsvpCountsForEvents(upcomingIds).catch(() => ({} as any))
+      : {};
+    rsvpsForUpcoming = upcomingIds.length > 0
+      ? await getRsvpsForEvents(upcomingIds).catch(() => ({} as any))
       : {};
     roster = await getRoster().catch(() => [] as any[]);
     recentMsgs = await getMessages('team', null, 8).catch(() => [] as any[]);
@@ -91,6 +95,14 @@ export default async function DashboardPage() {
         const rsvpSummary = totalPlayers > 0
           ? `Yes: ${yesCount} | No: ${noCount} | Not Responded: ${notResponded}`
           : (yesCount > 0 || noCount > 0 ? `Yes: ${yesCount} | No: ${noCount}` : 'No RSVPs yet');
+        const rsvpListRaw = rsvpsForUpcoming[ev.id] || [];
+        const rsvpList = rsvpListRaw.length > 0
+          ? rsvpListRaw.map((r: any) => {
+              const fam = r.family_name || 'Unknown Family';
+              const resp = r.response ? r.response.charAt(0).toUpperCase() + r.response.slice(1) : '';
+              return `${fam} - ${resp}`;
+            }).join(' • ')
+          : '';
         return {
           id: ev.id,
           title: ev.title || 'Event',
@@ -98,6 +110,7 @@ export default async function DashboardPage() {
           time: timeStr,
           location: ev.location || 'TBD',
           rsvpSummary,
+          rsvpList,
         };
       } catch {
         return null;
@@ -184,6 +197,11 @@ export default async function DashboardPage() {
                         <div className="text-[10px] text-muted-foreground mt-0.5">
                           {ev.rsvpSummary}
                         </div>
+                        {ev.rsvpList && (
+                          <div className="text-[9px] text-muted-foreground/80 mt-0.5 truncate">
+                            {ev.rsvpList}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))

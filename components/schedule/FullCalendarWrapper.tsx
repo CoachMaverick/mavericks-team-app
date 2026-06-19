@@ -23,6 +23,7 @@ interface FullCalendarWrapperProps {
   initialRsvpCounts?: Record<number | string, { yes: number; no: number; maybe: number; total: number }>;
   rsvpsByEvent?: Record<number | string, any[]>;
   rosterPlayers?: any[];
+  currentFamilyName?: string;
   showAddDialog?: boolean;
   onShowAddDialogChange?: (open: boolean) => void;
 }
@@ -41,6 +42,7 @@ export function FullCalendarWrapper({
   initialRsvpCounts = {},
   rsvpsByEvent = {},
   rosterPlayers = [],
+  currentFamilyName,
   showAddDialog: showAddDialogProp,
   onShowAddDialogChange,
 }: FullCalendarWrapperProps) {
@@ -50,6 +52,7 @@ export function FullCalendarWrapper({
   const [rsvpCounts, setRsvpCounts] = useState<Record<number | string, { yes: number; no: number; maybe: number; total: number }>>(initialRsvpCounts || {});
   const [rsvpsByEventState, setRsvpsByEventState] = useState<Record<number | string, any[]>>(rsvpsByEvent || {});
   const [rosterPlayersState, setRosterPlayersState] = useState<any[]>(rosterPlayers || []);
+  const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'My Family');
 
   const playersByFamily = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -74,6 +77,10 @@ export function FullCalendarWrapper({
   useEffect(() => {
     if (rosterPlayers) setRosterPlayersState(rosterPlayers);
   }, [rosterPlayers]);
+
+  useEffect(() => {
+    if (currentFamilyName) setCurrentFamilyNameState(currentFamilyName);
+  }, [currentFamilyName]);
 
   // Sync RSVP counts from parent (e.g. initial load or retry). Note: after live RSVP we update locally.
   useEffect(() => {
@@ -379,10 +386,10 @@ export function FullCalendarWrapper({
     }
   };
 
-  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no') => {
+  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no' | 'maybe') => {
     const supabase = createClient();
     try {
-      const fam = familyName || 'Demo Family';
+      const fam = familyName || currentFamilyNameState || 'My Family';
 
       // Use delete + insert to achieve "upsert" semantics reliably (supports re-voting / changing answer)
       // without depending on a unique constraint that may not be present in all DBs.
@@ -556,7 +563,7 @@ export function FullCalendarWrapper({
                         const players = playersByFamily[r.family_name] || [];
                         const display = players.length > 0 ? `${r.family_name} (${players.join(', ')})` : r.family_name;
                         const resp = r.response;
-                        const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+                        const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : resp === 'maybe' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
                         return (
                           <li key={idx} className="flex justify-between items-center">
                             <span className="truncate">{display}</span>
@@ -571,17 +578,24 @@ export function FullCalendarWrapper({
                 )}
 
                 {/* Prominent RSVP buttons */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <Button 
                     size="sm" 
-                    onClick={() => handleRsvp(selectedEvent.id, 'Demo Family', 'yes')} 
+                    onClick={() => handleRsvp(selectedEvent.id, currentFamilyNameState, 'yes')} 
                     className="bg-green-600 hover:bg-green-700 text-white text-xs py-1"
                   >
                     👍 Yes
                   </Button>
                   <Button 
                     size="sm" 
-                    onClick={() => handleRsvp(selectedEvent.id, 'Demo Family', 'no')} 
+                    onClick={() => handleRsvp(selectedEvent.id, currentFamilyNameState, 'maybe')} 
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1"
+                  >
+                    ❓ Maybe
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    onClick={() => handleRsvp(selectedEvent.id, currentFamilyNameState, 'no')} 
                     className="bg-red-600 hover:bg-red-700 text-white text-xs py-1"
                   >
                     👎 No

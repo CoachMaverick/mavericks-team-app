@@ -11,6 +11,7 @@ export default function SchedulePage() {
   const [rsvpCounts, setRsvpCounts] = useState<any>({});
   const [rsvpsByEvent, setRsvpsByEvent] = useState<any>({});
   const [rosterPlayers, setRosterPlayers] = useState<any[]>([]);
+  const [currentFamilyName, setCurrentFamilyName] = useState<string>('My Family');
   const [isCoach, setIsCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -89,6 +90,28 @@ export default function SchedulePage() {
         return [] as any[];
       });
       setRosterPlayers(roster);
+
+      // Determine current user's actual family name from profile + roster (so RSVPs use real names e.g. "Brower Family" not "Demo Family")
+      let famName = 'My Family';
+      if (isTemp) {
+        famName = (roster && roster.length && roster[0]?.family?.name) || 'Johnson Family';
+      } else if (currentUser) {
+        try {
+          const { data: profData } = await supabase
+            .from("profiles")
+            .select("family_id")
+            .eq("id", currentUser.id)
+            .maybeSingle() as any;
+          const myFamId = profData?.family_id;
+          if (myFamId) {
+            const match = roster.find((p: any) => p.family_id === myFamId);
+            if (match?.family?.name) famName = match.family.name;
+          }
+        } catch (e) {
+          console.warn("Schedule RSVP family name lookup:", e);
+        }
+      }
+      setCurrentFamilyName(famName);
     } catch (e: any) {
       console.error("Schedule error:", e);
       setLoadError('Failed to load schedule data. Some features may be unavailable.');
@@ -96,6 +119,7 @@ export default function SchedulePage() {
       setRsvpCounts({});
       setRsvpsByEvent({});
       setRosterPlayers([]);
+      setCurrentFamilyName('My Family');
     } finally {
       setLoading(false);
     }
@@ -103,6 +127,21 @@ export default function SchedulePage() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Realtime updates for RSVPs so lists/counts refresh across users/views
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('rsvps-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rsvps' }, () => {
+        loadData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleRetry = () => {
@@ -139,6 +178,7 @@ export default function SchedulePage() {
               initialRsvpCounts={rsvpCounts}
               rsvpsByEvent={rsvpsByEvent}
               rosterPlayers={rosterPlayers}
+              currentFamilyName={currentFamilyName}
               showAddDialog={showAddDialog}
               onShowAddDialogChange={setShowAddDialog}
             />
