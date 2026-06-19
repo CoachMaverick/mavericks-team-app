@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Search, Users } from 'lucide-react';
-import { getRoster, updatePlayer, deletePlayer, getFamilies, listAllFamilies } from '@/lib/actions';
+import { getRoster, updatePlayer, deletePlayer, getFamilies } from '@/lib/actions';
 import { FamilySetupDialog } from '@/components/FamilySetupDialog';
 
 interface RosterPlayer {
