@@ -52,15 +52,14 @@ export async function GET(request: Request) {
           .maybeSingle();
 
         if (!existingProfile) {
-          const isAdminAccount = (user.email || '').toLowerCase() === 'coach@comavericksbaseball.com';
           await supabase.from("profiles").insert({
             id: user.id,
             email: user.email,
-            role: isAdminAccount ? "admin" : "parent",
+            role: "parent",
             first_name: "",
             last_name: "",
-            is_admin: isAdminAccount,
-            has_completed_onboarding: isAdminAccount,
+            is_admin: false,
+            has_completed_onboarding: true, // temporary bypass: skip family setup for all on first login
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as any);
@@ -76,27 +75,22 @@ export async function GET(request: Request) {
     }
 
     // Auto-redirect to dashboard (or next param) - user is now logged in
-    // Skip family setup completely for coach@comavericksbaseball.com (admin) for zero friction on login.
-    // Only regular users see the first-login family setup prompt.
+    // Temporary bypass: skip family setup screen for ALL users.
+    // Flag is set to true on profile creation / first login.
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id) {
-        const userEmail = (user.email || '').toLowerCase();
-        if (userEmail === 'coach@comavericksbaseball.com') {
-          // Admin account: direct to dashboard, no family prompt
-        } else {
+        // ensure flag (in case profile was created without it)
+        try {
           const { data: prof } = await supabase
             .from("profiles")
-            .select("family_id, role, has_completed_onboarding")
+            .select("has_completed_onboarding")
             .eq("id", user.id)
             .maybeSingle() as any;
-          const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id)) &&
-            (prof?.role !== 'coach' && prof?.role !== 'admin');
-          if (needsSetup) {
-            const loginUrl = `${configuredSite}/login?prompt=family`;
-            return NextResponse.redirect(loginUrl);
+          if (!prof?.has_completed_onboarding) {
+            await (supabase as any).from("profiles").update({ has_completed_onboarding: true }).eq("id", user.id);
           }
-        }
+        } catch {}
       }
     } catch {}
 
