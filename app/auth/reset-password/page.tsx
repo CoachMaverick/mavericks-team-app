@@ -14,67 +14,80 @@ function ResetPasswordContent() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [verifying, setVerifying] = useState(true);
   const [ready, setReady] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Read token from URL (token_hash + type or code for PKCE).
-  // Verify to establish a temporary recovery session, then allow updateUser.
   useEffect(() => {
-    const processToken = async () => {
-      setVerifying(true);
+    const initFromUrl = async () => {
+      const supabase = createClient();
+
+      // Read from query string
+      let access_token = searchParams.get("access_token");
+      let refresh_token = searchParams.get("refresh_token");
+      let type = searchParams.get("type");
+
+      // Also support tokens in the URL hash fragment (very common for Supabase recovery emails)
+      // e.g. /auth/reset-password#access_token=xxx&type=recovery
+      if ((!access_token || !type) && typeof window !== "undefined") {
+        const hash = window.location.hash.replace(/^#/, "");
+        if (hash) {
+          const hashParams = new URLSearchParams(hash);
+          access_token = access_token || hashParams.get("access_token");
+          refresh_token = refresh_token || hashParams.get("refresh_token");
+          type = type || hashParams.get("type");
+        }
+      }
+
       try {
-        const supabase = createClient();
-
-        const code = searchParams.get("code");
-        const token_hash = searchParams.get("token_hash");
-        const type = searchParams.get("type");
-
-        // Consume the recovery token if present in the URL.
-        // This is required so that updateUser is allowed.
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        } else if (token_hash && type === "recovery") {
-          const { error } = await supabase.auth.verifyOtp({
-            token_hash,
-            type: "recovery",
+        if (access_token && type === "recovery") {
+          // Activate the recovery session using the token from the email link
+          const { error: setErr } = await supabase.auth.setSession({
+            access_token,
+            refresh_token: refresh_token || "",
           });
-          if (error) throw error;
-        }
+          if (setErr) throw setErr;
 
-        // Check if we now have a session (either from the token above,
-        // or because a server route like /auth/confirm already verified and set cookies).
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            setUserEmail(user.email || null);
+            setReady(true);
+            setError(null);
 
-        if (user && !userError) {
-          setUserEmail(user.email ?? null);
-          setReady(true);
-
-          // Remove sensitive token from the address bar
-          if (code || token_hash) {
-            router.replace("/auth/reset-password");
+            // Clean tokens from the browser URL
+            if (typeof window !== "undefined") {
+              router.replace("/auth/reset-password");
+            }
+            return;
           }
-        } else {
-          setReady(false);
         }
-      } catch (err: any) {
-        console.error("Password reset token error:", err);
+
+        // Fallback: server routes (/auth/confirm or /auth/callback) may have already
+        // verified the recovery token and set cookies. Check for an active session.
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserEmail(user.email || null);
+          setReady(true);
+          setError(null);
+          return;
+        }
+
         setReady(false);
-        // Don't spam toast here — we'll show a clear error UI below
-      } finally {
-        setVerifying(false);
+        setError("This password reset link is invalid or has expired.");
+      } catch (e: any) {
+        console.error("Failed to initialize recovery session", e);
+        setReady(false);
+        setError("This password reset link is invalid or has expired.");
       }
     };
 
-    processToken();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    initFromUrl();
+  }, [searchParams, router]);
 
-  const handleSetNewPassword = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!newPassword || newPassword.length < 6) {
@@ -90,48 +103,30 @@ function ResetPasswordContent() {
     try {
       const supabase = createClient();
 
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
       if (error) throw error;
 
-      toast.success("Your password has been reset successfully!");
+      toast.success("Password has been reset successfully!");
 
-      // Session is now active with the new password
+      // User is now authenticated with the new password
       router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
-      const message = err?.message || "Failed to reset password.";
-      toast.error(message.includes("session") ? "Reset link expired. Please request a new one." : message);
+      const msg = err?.message || "Failed to reset password.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // Loading while we verify the token from the URL
-  if (verifying) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="flex justify-center mb-4">
-              <TeamLogo size="lg" className="drop-shadow-md" />
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">Mavericks 12U</h1>
-          </div>
-          <Card className="mavericks-card">
-            <CardContent className="py-10 flex flex-col items-center gap-3">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Verifying reset link...</p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
-        {/* Header */}
+        {/* Branding */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <TeamLogo size="lg" className="drop-shadow-md" />
@@ -150,8 +145,8 @@ function ResetPasswordContent() {
                 <CardTitle className="text-2xl">Set New Password</CardTitle>
                 <CardDescription>
                   {ready
-                    ? "Choose a new password for your account."
-                    : "This password reset link is invalid or has expired."}
+                    ? "Enter your new password below."
+                    : "Invalid or expired reset link."}
                 </CardDescription>
               </div>
             </div>
@@ -159,11 +154,10 @@ function ResetPasswordContent() {
 
           <CardContent>
             {ready ? (
-              // Clean "Set New Password" form
-              <form onSubmit={handleSetNewPassword} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-4">
                 {userEmail && (
                   <div className="text-sm text-muted-foreground">
-                    Resetting password for <span className="font-medium text-foreground">{userEmail}</span>
+                    Resetting for <span className="font-medium text-foreground">{userEmail}</span>
                   </div>
                 )}
 
@@ -182,7 +176,6 @@ function ResetPasswordContent() {
                     disabled={loading}
                     autoComplete="new-password"
                   />
-                  <p className="text-xs text-muted-foreground">Must be at least 6 characters.</p>
                 </div>
 
                 <div className="space-y-2">
@@ -210,7 +203,7 @@ function ResetPasswordContent() {
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Saving...
+                      Saving new password...
                     </>
                   ) : (
                     "Set New Password"
@@ -218,29 +211,26 @@ function ResetPasswordContent() {
                 </Button>
 
                 <p className="text-center text-xs text-muted-foreground">
-                  After setting your new password you will be signed in automatically.
+                  After resetting, you will be signed in and taken to the dashboard.
                 </p>
               </form>
             ) : (
-              // Clear error state when token is missing or invalid
               <div className="space-y-4">
-                <div className="rounded-md bg-destructive/10 border border-destructive/20 p-4 text-sm text-destructive-foreground">
-                  The password reset link is invalid or has expired.
-                  <br />
-                  Please request a new password reset link.
+                <div className="rounded-md bg-destructive/10 border border-destructive/20 p-4 text-sm">
+                  {error || "No valid reset token was found in the link."}
                 </div>
 
                 <Button
                   type="button"
-                  className="w-full"
                   variant="outline"
+                  className="w-full"
                   onClick={() => router.push("/login")}
                 >
-                  Go to Login
+                  Return to Login
                 </Button>
 
                 <p className="text-center text-xs text-muted-foreground">
-                  On the login page, click "Forgot Password?" to receive a new link.
+                  Request a new link using "Forgot Password?" on the login page.
                 </p>
               </div>
             )}
