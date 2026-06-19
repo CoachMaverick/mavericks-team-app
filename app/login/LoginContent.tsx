@@ -321,7 +321,8 @@ export default function LoginContent() {
     if (!famName.trim()) return;
     setFamLoading(true);
     try {
-      const match = allFamilies.find((f: any) => f.name.toLowerCase() === famName.trim().toLowerCase());
+      const q = famName.trim().toLowerCase();
+      const match = allFamilies.find((f: any) => (f.name || '').toLowerCase().includes(q));
       if (match) {
         await joinExistingFamily(match.id);
         toast.success('Joined family!');

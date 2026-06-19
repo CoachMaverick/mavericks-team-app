@@ -423,17 +423,22 @@ export async function getFamilies() {
 }
 
 export async function listAllFamilies() {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
-    let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-    supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
-    const supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+  try {
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+      let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+      supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+      const supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+      const { data } = await supabase.from('families').select('id, name').order('name');
+      return data || [];
+    }
+    const supabase = await createClient();
     const { data } = await supabase.from('families').select('id, name').order('name');
     return data || [];
+  } catch (e: any) {
+    console.warn('[listAllFamilies] error (returning empty):', e?.message);
+    return [];
   }
-  const supabase = await createClient();
-  const { data } = await supabase.from('families').select('id, name').order('name');
-  return data || [];
 }
 
 export async function createFamilyAndLink(name: string) {
@@ -466,20 +471,42 @@ export async function createFamilyAndLink(name: string) {
 }
 
 export async function joinExistingFamily(familyId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authClient = await createClient();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) throw new Error('Not authenticated');
-  const { error } = await (supabase as any).from('profiles').update({ family_id: familyId, has_completed_onboarding: true }).eq('id', user.id);
+
+  let supabase;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+    let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+    supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
+  } else {
+    supabase = await getSupabaseForReadWrite();
+  }
+
+  const { error } = await supabase.from('profiles').update({ family_id: familyId, has_completed_onboarding: true }).eq('id', user.id);
   if (error) throw error;
   return { success: true };
 }
 
 // Allow skipping family setup on first login (or later) — marks onboarding complete so prompt never shows again
 export async function skipFamilySetup() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authClient = await createClient();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) throw new Error('Not authenticated');
-  const { error } = await (supabase as any).from('profiles').update({ has_completed_onboarding: true }).eq('id', user.id);
+
+  let supabase;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+    let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+    supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
+  } else {
+    supabase = await getSupabaseForReadWrite();
+  }
+
+  const { error } = await supabase.from('profiles').update({ has_completed_onboarding: true }).eq('id', user.id);
   if (error) throw error;
   return { success: true };
 }
