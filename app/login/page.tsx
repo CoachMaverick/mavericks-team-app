@@ -11,17 +11,12 @@ import { TeamLogo } from "@/components/TeamLogo";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("coach@comavericksbaseball.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [magicSent, setMagicSent] = useState(false);
   const router = useRouter();
-
-  // If using demo mode, go straight to dashboard
-  useEffect(() => {
-    if (document.cookie.includes("temp-coach=1")) {
-      router.replace("/dashboard");
-    }
-  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,88 +28,59 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    const expectedEmail = "coach@comavericksbaseball.com";
-    const isDemoEmail = email.trim().toLowerCase() === expectedEmail;
-
-    let navigated = false;
-
     try {
       const supabase = createClient();
 
-      // Prioritize real Supabase auth
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
 
-      if (error) {
-        if (!isDemoEmail) {
-          throw error;
-        }
-        // For demo email, fall back to demo mode below
-      } else if (data.user) {
-        // Real login succeeded.
-        // For the special coach email, set temp-coach cookie to enable service-role bypass for data (same as demo)
-        // This gives full admin access even if DB profile not synced.
-        if (data.user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
-          document.cookie = "temp-coach=1; path=/; max-age=86400";
-        } else {
-          document.cookie = "temp-coach=; path=/; max-age=0";
-        }
+      if (error) throw error;
 
-        // Explicitly refresh the user session
-        try {
-          await supabase.auth.refreshSession();
-        } catch (e) {
-          console.warn("Session refresh after login (non-fatal):", e);
-        }
-
-        let isAdmin = false;
-        try {
-          const { data: profileData } = await supabase
-            .from("profiles")
-            .select("is_admin, role")
-            .eq("id", data.user.id)
-            .single<any>();
-          isAdmin = profileData?.is_admin === true || profileData?.role === 'admin';
-        } catch (e) {
-          // profile may not exist yet; treat login as success (layout will set)
-        }
-
-        // Force admin for the coach email even if profile not yet updated
-        if (data.user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
-          isAdmin = true;
-        }
-
-        toast.success(isAdmin ? "✅ Logged in as Admin" : "Logged in");
-        router.push("/dashboard");
-        router.refresh(); // Ensure server components (e.g. layout auth check) see the new session cookies
-        navigated = true;
-        return;
-      }
-    } catch (err: any) {
-      if (!isDemoEmail) {
-        toast.error(err.message || "Login failed");
-        return;
-      }
-      // fallthrough to demo for expected email
-    } finally {
-      if (!navigated) {
-        setLoading(false);
-      }
-    }
-
-    // Fallback for demo email (demo accounts only)
-    if (isDemoEmail) {
-      document.cookie = "temp-coach=1; path=/; max-age=86400"; // 1 day
-      await new Promise((r) => setTimeout(r, 300));
-      toast.success("Logged in (demo mode)");
+      toast.success("Logged in successfully!");
       router.push("/dashboard");
       router.refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMagicLink = async (isSignup: boolean = false) => {
+    if (!email) {
+      toast.error("Please enter your email address");
       return;
     }
 
-    toast.error("Login failed");
+    setLoading(true);
+    setMagicSent(false);
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          shouldCreateUser: isSignup,
+        },
+      });
+
+      if (error) throw error;
+
+      setMagicSent(true);
+      toast.success(
+        isSignup
+          ? "Magic link sent! Check your email to sign up and log in."
+          : "Magic link sent! Check your email to log in."
+      );
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send magic link");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -131,16 +97,52 @@ export default function LoginPage() {
 
         <Card className="mavericks-card">
           <CardHeader>
-            <CardTitle className="text-2xl">Mavericks 12U Login</CardTitle>
+            <CardTitle className="text-2xl">
+              {mode === "login" ? "Log in to Mavericks 12U" : "Sign up for Mavericks 12U"}
+            </CardTitle>
             <CardDescription>
-              Sign in with real Supabase admin credentials, or use the demo email.
+              {mode === "login"
+                ? "Enter your email and password, or use a magic link."
+                : "Sign up easily with a magic link — no password needed!"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
+            {/* Mode switch for clearer signup/login */}
+            <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  setMagicSent(false);
+                }}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                  mode === "login"
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Log in
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("signup");
+                  setMagicSent(false);
+                }}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                  mode === "signup"
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Sign up
+              </button>
+            </div>
+
+            <form onSubmit={mode === "login" ? handleLogin : (e) => e.preventDefault()} className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
-                  Email
+                  Email address
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -150,44 +152,109 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-10"
-                    placeholder="coach@comavericksbaseball.com"
+                    placeholder="you@example.com"
                     required
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  Password (any)
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+              {mode === "login" && (
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">
+                    Password
+                  </label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+              )}
 
-              <Button
-                type="submit"
-                className="mavericks-btn-primary w-full h-11 text-base"
-                disabled={loading || !email || !password}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Logging in...
-                  </>
-                ) : (
-                  "Log in"
-                )}
-              </Button>
+              {mode === "login" ? (
+                <>
+                  <Button
+                    type="submit"
+                    className="mavericks-btn-primary w-full h-11 text-base"
+                    disabled={loading || !email || !password}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Logging in...
+                      </>
+                    ) : (
+                      "Log in with password"
+                    )}
+                  </Button>
 
-              <p className="text-xs text-center text-muted-foreground">
-                Real admins use Supabase auth. Demo email available.
-              </p>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">or</span>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleMagicLink(false)}
+                    disabled={loading || !email}
+                  >
+                    {loading ? "Sending..." : "Send magic link to log in"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {/* Signup flow: magic link emphasis for ease */}
+                  <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                    <strong>Super easy signup:</strong> We'll email you a secure magic link.
+                    Click it to create your account and sign in instantly — no password to create or remember.
+                  </div>
+
+                  <Button
+                    type="button"
+                    className="mavericks-btn-primary w-full h-11 text-base"
+                    onClick={() => handleMagicLink(true)}
+                    disabled={loading || !email}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Sending magic link...
+                      </>
+                    ) : (
+                      "Send magic link to sign up"
+                    )}
+                  </Button>
+
+                  <p className="text-center text-xs text-muted-foreground">
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      className="underline hover:no-underline"
+                      onClick={() => {
+                        setMode("login");
+                        setMagicSent(false);
+                      }}
+                    >
+                      Log in instead
+                    </button>
+                  </p>
+                </>
+              )}
+
+              {magicSent && (
+                <div className="text-center text-sm text-green-600 bg-green-50 p-3 rounded-md">
+                  Check your email inbox (and spam folder) for the link!
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>
