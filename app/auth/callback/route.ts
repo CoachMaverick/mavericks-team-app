@@ -68,6 +68,11 @@ export async function GET(request: Request) {
       console.warn("Profile creation check skipped (non-fatal):", profileErr);
     }
 
+    // For password recovery links, send user to the reset password form (session is a temporary recovery session)
+    if (type === 'recovery') {
+      return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
+    }
+
     // Auto-redirect to dashboard (or next param) - user is now logged in
     const forwardedHost = request.headers.get("x-forwarded-host"); // original origin before load balancer
     const isLocalEnv = process.env.NODE_ENV === "development";

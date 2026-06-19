@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
 
+  const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as 
     | "signup" 
@@ -31,75 +32,82 @@ export async function GET(request: Request) {
   // This ensures "default Supabase email templates work with http://localhost:3000".
   const configuredSite = (process.env.NEXT_PUBLIC_APP_URL || origin).replace(/\/$/, "");
 
-  if (token_hash && type) {
-    const supabase = await createClient();
+  const supabase = await createClient();
 
+  let authError: any = null;
+
+  if (code) {
+    // PKCE code flow (some reset / magic links)
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    authError = error;
+  } else if (token_hash && type) {
+    // Token hash flow (standard for password reset emails)
     const { error } = await supabase.auth.verifyOtp({
       token_hash,
       type,
     });
-
-    if (!error) {
-      // Session cookies are set by the Supabase server client.
-      // Ensure new user has a basic profile (in case trigger didn't run or for magic link)
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && user.id) {
-          const { data: existingProfile } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("id", user.id)
-            .maybeSingle();
-
-          if (!existingProfile) {
-            await supabase.from("profiles").insert({
-              id: user.id,
-              email: user.email,
-              role: "parent",
-              first_name: "",
-              last_name: "",
-              is_admin: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            } as any);
-          }
-        }
-      } catch (profileErr) {
-        console.warn("Profile creation check skipped (non-fatal):", profileErr);
-      }
-
-      // Redirect the user to the next page (or dashboard).
-      const forwardedHost = request.headers.get("x-forwarded-host");
-      const isLocalEnv = process.env.NODE_ENV === "development";
-
-      let redirectUrl: string;
-      if (isLocalEnv) {
-        redirectUrl = `${configuredSite}${next}`;
-      } else if (forwardedHost) {
-        redirectUrl = `https://${forwardedHost}${next}`;
-      } else {
-        redirectUrl = `${configuredSite}${next}`;
-      }
-
-      if (type === 'recovery') {
-        // For password reset, redirect to login with recovery flag so we can show new password form (session is set for recovery)
-        return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
-      }
-      return NextResponse.redirect(redirectUrl);
-    }
-
-    // Error (e.g. invalid/expired token) - better messages
-    let errorMessage = error.message || "auth";
-    if (errorMessage.toLowerCase().includes("rate") || errorMessage.toLowerCase().includes("too many")) {
-      errorMessage = "Too many attempts — please wait a few minutes before trying again.";
-    } else if (errorMessage.includes("expired") || errorMessage.includes("invalid")) {
-      errorMessage = "Magic link expired or invalid. Please try signing up or logging in again.";
-    }
-    return NextResponse.redirect(
-      `${configuredSite}/login?error=${encodeURIComponent(errorMessage)}`
-    );
+    authError = error;
   }
 
-  // Fallback / missing params
-  return NextResponse.redirect(`${configuredSite}/login?error=auth`);
+  if (!authError) {
+    // Session cookies are set by the Supabase server client.
+    // Ensure new user has a basic profile (in case trigger didn't run or for magic link)
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.id) {
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!existingProfile) {
+          await supabase.from("profiles").insert({
+            id: user.id,
+            email: user.email,
+            role: "parent",
+            first_name: "",
+            last_name: "",
+            is_admin: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as any);
+        }
+      }
+    } catch (profileErr) {
+      console.warn("Profile creation check skipped (non-fatal):", profileErr);
+    }
+
+    // For password recovery: the verified session is a temporary recovery session.
+    // Send the user to the login page which will present the "set new password" form.
+    // After they successfully update the password we will keep them logged in.
+    if (type === 'recovery') {
+      return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
+    }
+
+    // Normal flows (signup confirm, magic link, etc.): go to dashboard or ?next
+    const forwardedHost = request.headers.get("x-forwarded-host");
+    const isLocalEnv = process.env.NODE_ENV === "development";
+
+    let redirectUrl: string;
+    if (isLocalEnv) {
+      redirectUrl = `${configuredSite}${next}`;
+    } else if (forwardedHost) {
+      redirectUrl = `https://${forwardedHost}${next}`;
+    } else {
+      redirectUrl = `${configuredSite}${next}`;
+    }
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Error (e.g. invalid/expired token) - better messages
+  let errorMessage = authError?.message || "auth";
+  if (errorMessage.toLowerCase().includes("rate") || errorMessage.toLowerCase().includes("too many")) {
+    errorMessage = "Too many attempts — please wait a few minutes before trying again.";
+  } else if (errorMessage.includes("expired") || errorMessage.includes("invalid")) {
+    errorMessage = "Reset link expired or invalid. Please request a new password reset.";
+  }
+  return NextResponse.redirect(
+    `${configuredSite}/login?error=${encodeURIComponent(errorMessage)}`
+  );
 }
