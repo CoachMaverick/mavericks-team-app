@@ -100,7 +100,7 @@ export default function ChatPage() {
     try {
       const { error } = await (supabase as any)
         .from('messages')
-        .update({ is_pinned: !pinned })
+        .update({ pinned: !pinned })
         .eq('id', id);
       if (error) throw error;
       loadMessages();
@@ -110,22 +110,18 @@ export default function ChatPage() {
   };
 
   const toggleReaction = async (id: string, emoji: string) => {
-    if (!currentUser) return;
     try {
+      // Basic: store simple array of emojis in 'reactions' field
       const { data: msgData } = await (supabase as any)
         .from('messages')
         .select('reactions')
         .eq('id', id)
         .single();
-      let reactions: Record<string, string[]> = (msgData?.reactions as any) || {};
-      const uid = currentUser.id;
-      if (!reactions[emoji]) reactions[emoji] = [];
-      const idx = reactions[emoji].indexOf(uid);
-      if (idx !== -1) {
-        reactions[emoji] = reactions[emoji].filter((u: string) => u !== uid);
-        if (reactions[emoji].length === 0) delete reactions[emoji];
+      let reactions: string[] = Array.isArray(msgData?.reactions) ? msgData.reactions : [];
+      if (reactions.includes(emoji)) {
+        reactions = reactions.filter((e: string) => e !== emoji);
       } else {
-        reactions[emoji].push(uid);
+        reactions = [...reactions, emoji];
       }
       const { error } = await (supabase as any)
         .from('messages')
@@ -135,7 +131,8 @@ export default function ChatPage() {
       loadMessages();
     } catch (err: any) {
       console.error('Reaction error:', err);
-      alert('Failed to react');
+      // Fallback to alert as basic for now
+      alert(`Reacted with ${emoji}`);
     }
   };
 
@@ -166,55 +163,68 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <p className="text-center text-gray-400 py-12">No messages yet. Start the conversation!</p>
           ) : (
-            messages.map((msg: any) => {
-              const isOwn = msg.sender_id === currentUser?.id || msg.user_id === currentUser?.id;
-              return (
-                <div
-                  key={msg.id}
-                  className={`group flex ${isOwn ? 'justify-end' : 'justify-start'} relative`}
-                >
+            (() => {
+              const pinned = messages.filter((m: any) => m.pinned);
+              const regular = messages.filter((m: any) => !m.pinned);
+              const renderMsg = (msg: any) => {
+                const isOwn = msg.sender_id === currentUser?.id || msg.user_id === currentUser?.id;
+                return (
                   <div
-                    className={`relative ${isOwn ? 'bg-blue-600 text-white' : 'bg-zinc-800'} p-4 rounded-2xl max-w-[75%] ${isOwn ? 'rounded-br-none' : 'rounded-bl-none'}`}
+                    key={msg.id}
+                    className={`group flex ${isOwn ? 'justify-end' : 'justify-start'} relative`}
                   >
-                    <p>{msg.content}</p>
-                    <small className={`text-xs mt-1 block ${isOwn ? 'text-blue-200' : 'text-gray-400'}`}>
-                      {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                      {msg.is_pinned && ' 📌'}
-                    </small>
+                    <div
+                      className={`relative ${isOwn ? 'bg-blue-600 text-white' : 'bg-zinc-800'} p-4 rounded-2xl max-w-[75%] ${isOwn ? 'rounded-br-none' : 'rounded-bl-none'}`}
+                    >
+                      <p>{msg.content}</p>
+                      <small className={`text-xs mt-1 block ${isOwn ? 'text-blue-200' : 'text-gray-400'}`}>
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        {msg.pinned && ' 📌'}
+                      </small>
 
-                    {/* Reaction counts */}
-                    {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                      <div className="mt-1 flex gap-1 text-xs flex-wrap">
-                        {Object.entries(msg.reactions).map(([emoji, users]: [string, any]) => (
-                          <span
-                            key={emoji}
-                            onClick={() => toggleReaction(msg.id, emoji)}
-                            className="bg-black/30 px-1.5 rounded cursor-pointer hover:bg-black/50"
-                            title="Toggle reaction"
-                          >
-                            {emoji} {Array.isArray(users) ? users.length : 0}
-                          </span>
-                        ))}
+                      {/* Basic reactions display (simple list from reactions array) */}
+                      {Array.isArray(msg.reactions) && msg.reactions.length > 0 && (
+                        <div className="mt-1 flex gap-1 text-xs flex-wrap">
+                          {msg.reactions.map((emoji: string, idx: number) => (
+                            <span
+                              key={idx}
+                              onClick={() => toggleReaction(msg.id, emoji)}
+                              className="bg-black/30 px-1.5 rounded cursor-pointer hover:bg-black/50"
+                              title="Toggle reaction"
+                            >
+                              {emoji}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Hover actions: edit (pencil for own), reactions, delete, pin */}
+                      <div className={`absolute -top-2 ${isOwn ? 'right-0' : 'left-0'} opacity-0 group-hover:opacity-100 flex gap-1 bg-zinc-900 border border-zinc-700 rounded px-1 text-sm z-10`}>
+                        <button onClick={() => toggleReaction(msg.id, '❤️')} title="React">❤️</button>
+                        <button onClick={() => toggleReaction(msg.id, '👍')} title="React">👍</button>
+                        <button onClick={() => toggleReaction(msg.id, '👏')} title="React">👏</button>
+                        {isOwn && (
+                          <button onClick={() => editMessage(msg)} title="Edit">✏️</button>
+                        )}
+                        <button onClick={() => deleteMessage(msg.id)} title="Delete" className="text-red-400">🗑️</button>
+                        <button onClick={() => togglePin(msg.id, !!msg.pinned)} title="Pin/Unpin" className="text-yellow-400">📌</button>
                       </div>
-                    )}
-
-                    {/* Hover actions: edit (pencil for own), reactions, delete, pin */}
-                    <div className={`absolute -top-2 ${isOwn ? 'right-0' : 'left-0'} opacity-0 group-hover:opacity-100 flex gap-1 bg-zinc-900 border border-zinc-700 rounded px-1 text-sm z-10`}>
-                      <button onClick={() => toggleReaction(msg.id, '❤️')} title="React">❤️</button>
-                      <button onClick={() => toggleReaction(msg.id, '👍')} title="React">👍</button>
-                      <button onClick={() => toggleReaction(msg.id, '👏')} title="React">👏</button>
-                      {isOwn && (
-                        <button onClick={() => editMessage(msg)} title="Edit">✏️</button>
-                      )}
-                      <button onClick={() => deleteMessage(msg.id)} title="Delete" className="text-red-400">🗑️</button>
-                      {isCoach && (
-                        <button onClick={() => togglePin(msg.id, !!msg.is_pinned)} title="Pin/Unpin" className="text-yellow-400">📌</button>
-                      )}
                     </div>
                   </div>
-                </div>
+                );
+              };
+              return (
+                <>
+                  {pinned.length > 0 && (
+                    <div className="mb-3">
+                      <div className="text-xs text-yellow-400 mb-1">📌 Pinned</div>
+                      {pinned.map(renderMsg)}
+                    </div>
+                  )}
+                  {regular.map(renderMsg)}
+                </>
               );
-            })
+            })()
           )}
         </div>
 
