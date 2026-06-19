@@ -11,14 +11,28 @@ export default function ChatPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isCoach, setIsCoach] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [isTemp, setIsTemp] = useState(false);
 
   const supabase = createClient();
 
+  const QUICK_EMOJIS = ['👍', '❤️', '👏', '🔥', '😂'];
+
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setCurrentUser(user);
+      const temp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+      setIsTemp(!!temp);
+
+      let user: any = null;
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser();
+        user = u;
+      } catch (e) {
+        console.error('[Chat] getUser error:', e);
+        user = null;
+      }
+
       if (user) {
+        setCurrentUser(user);
         try {
           const { data: profile } = await supabase
             .from('profiles')
@@ -30,16 +44,27 @@ export default function ChatPage() {
         } catch (e) {
           setIsCoach(false);
         }
+      } else if (temp) {
+        // Demo / temp-coach support: synthetic user for UI logic (ownership, reactions)
+        setCurrentUser({ id: 'temp-coach-id' });
+        setIsCoach(true);
+      } else {
+        setCurrentUser(null);
+        setIsCoach(false);
       }
+
       loadMessages();
     };
     init();
 
-    // Realtime
+    // Realtime (skip reload for temp which uses optimistic local state only)
     const channel = supabase
       .channel('messages')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-        loadMessages();
+        const stillTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+        if (!stillTemp) {
+          loadMessages();
+        }
       })
       .subscribe();
 
@@ -54,14 +79,16 @@ export default function ChatPage() {
       const { data, error } = await supabase
         .from('messages')
         .select('*')
-        .eq('channel', 'team')
+        .eq('channel_type', 'team')
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setMessages(data || []);
+      const filtered = (data || []).filter((m: any) => m.is_deleted !== true);
+      setMessages(filtered);
     } catch (err: any) {
       console.error('Load messages error:', err);
-      setError('Failed to load messages');
+      // Keep previous messages on transient error; don't wipe UI
+      if (messages.length === 0) setError('Failed to load messages');
     } finally {
       setLoading(false);
     }
@@ -73,18 +100,38 @@ export default function ChatPage() {
       return;
     }
 
+    const content = newMessage.trim();
+
+    // For temp/demo: optimistic local state only (avoids RLS on unauth client)
+    if (isTemp) {
+      const optimistic = {
+        id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+        content,
+        sender_id: 'temp-coach-id',
+        channel_type: 'team',
+        created_at: new Date().toISOString(),
+        reactions: {},
+        is_pinned: false,
+        is_deleted: false,
+      };
+      setMessages(prev => [...prev, optimistic]);
+      setNewMessage('');
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('messages')
         .insert([{
-          content: newMessage.trim(),
-          user_id: currentUser.id,
-          channel: 'team',
+          content,
+          sender_id: currentUser.id,
+          channel_type: 'team',
         }] as any);
 
       if (error) throw error;
 
       setNewMessage('');
+      // realtime will also trigger load, but force refresh for immediate
       loadMessages();
     } catch (err: any) {
       console.error('Send error:', err);
@@ -95,12 +142,21 @@ export default function ChatPage() {
   const editMessage = async (msg: any) => {
     const newContent = prompt('Edit message:', msg.content);
     if (newContent === null || newContent.trim() === msg.content) return;
+
+    const trimmed = newContent.trim();
+
+    if (isTemp) {
+      // optimistic for demo
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: trimmed } : m));
+      return;
+    }
+
     try {
       const { error } = await (supabase as any)
         .from('messages')
-        .update({ content: newContent.trim() })
+        .update({ content: trimmed })
         .eq('id', msg.id)
-        .eq('user_id', currentUser.id);
+        .eq('sender_id', currentUser?.id);
       if (error) throw error;
       loadMessages();
     } catch (e: any) {
@@ -111,10 +167,21 @@ export default function ChatPage() {
 
   const deleteMessage = async (id: string) => {
     if (!confirm('Delete this message?')) return;
+
+    if (isTemp) {
+      // optimistic soft delete in local for demo
+      setMessages(prev => prev.filter(m => m.id !== id));
+      return;
+    }
+
     try {
-      let query = (supabase as any).from('messages').delete().eq('id', id);
+      // Soft delete for stability + matches schema RLS update policy
+      let query = (supabase as any)
+        .from('messages')
+        .update({ is_deleted: true })
+        .eq('id', id);
       if (!isCoach) {
-        query = query.eq('user_id', currentUser.id);
+        query = query.eq('sender_id', currentUser.id);
       }
       const { error } = await query;
       if (error) throw error;
@@ -126,10 +193,18 @@ export default function ChatPage() {
   };
 
   const togglePin = async (id: string, isPinned: boolean) => {
+    const newPinned = !isPinned;
+
+    if (isTemp) {
+      // optimistic for demo
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, is_pinned: newPinned } : m));
+      return;
+    }
+
     try {
       const { error } = await (supabase as any)
         .from('messages')
-        .update({ is_pinned: !isPinned })
+        .update({ is_pinned: newPinned })
         .eq('id', id);
       if (error) throw error;
       loadMessages();
@@ -141,6 +216,27 @@ export default function ChatPage() {
 
   const toggleReaction = async (id: string, emoji: string) => {
     if (!currentUser) return;
+
+    const uid = currentUser.id;
+
+    // Optimistic + local for temp/demo
+    if (isTemp) {
+      setMessages(prev => prev.map((m: any) => {
+        if (m.id !== id) return m;
+        const reactions: Record<string, string[]> = { ...(m.reactions || {}) };
+        if (!reactions[emoji]) reactions[emoji] = [];
+        const idx = reactions[emoji].indexOf(uid);
+        if (idx !== -1) {
+          reactions[emoji] = reactions[emoji].filter((u: string) => u !== uid);
+          if (reactions[emoji].length === 0) delete reactions[emoji];
+        } else {
+          reactions[emoji] = [...reactions[emoji], uid];
+        }
+        return { ...m, reactions };
+      }));
+      return;
+    }
+
     try {
       const { data: msg, error: fetchErr } = await (supabase as any)
         .from('messages')
@@ -148,15 +244,14 @@ export default function ChatPage() {
         .eq('id', id)
         .single();
       if (fetchErr) throw fetchErr;
-      let reactions = msg?.reactions || {};
+      let reactions: Record<string, string[]> = (msg?.reactions as any) || {};
       if (!reactions[emoji]) reactions[emoji] = [];
-      const uid = currentUser.id;
       const idx = reactions[emoji].indexOf(uid);
       if (idx !== -1) {
         reactions[emoji] = reactions[emoji].filter((u: string) => u !== uid);
         if (reactions[emoji].length === 0) delete reactions[emoji];
       } else {
-        reactions[emoji].push(uid);
+        reactions[emoji] = [...reactions[emoji], uid];
       }
       const { error } = await (supabase as any)
         .from('messages')
@@ -170,8 +265,8 @@ export default function ChatPage() {
     }
   };
 
-  const canEdit = (msg: any) => msg.user_id === currentUser?.id;
-  const canDelete = (msg: any) => msg.user_id === currentUser?.id || isCoach;
+  const canEdit = (msg: any) => msg.sender_id === currentUser?.id;
+  const canDelete = (msg: any) => msg.sender_id === currentUser?.id || isCoach;
   const canPin = () => isCoach;
 
   return (
@@ -192,10 +287,11 @@ export default function ChatPage() {
             <p className="text-center text-gray-400 py-12">No messages yet. Start the conversation!</p>
           ) : (
             (() => {
-              const pinned = messages.filter((m: any) => m.is_pinned);
-              const regular = messages.filter((m: any) => !m.is_pinned);
+              const visible = messages.filter((m: any) => m.is_deleted !== true);
+              const pinned = visible.filter((m: any) => m.is_pinned);
+              const regular = visible.filter((m: any) => !m.is_pinned);
               const renderMsg = (msg: any) => {
-                const isOwn = msg.user_id === currentUser?.id;
+                const isOwn = msg.sender_id === currentUser?.id;
                 return (
                   <div 
                     key={msg.id} 
@@ -210,7 +306,7 @@ export default function ChatPage() {
                         {msg.is_pinned && ' 📌'}
                       </small>
 
-                      {/* Reactions */}
+                      {/* Reactions counts (click to toggle) */}
                       {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                         <div className="mt-1 flex gap-1 text-xs flex-wrap">
                           {Object.entries(msg.reactions).map(([emoji, users]: [string, any]) => (
@@ -218,6 +314,7 @@ export default function ChatPage() {
                               key={emoji} 
                               onClick={() => toggleReaction(msg.id, emoji)} 
                               className="bg-black/30 px-1.5 rounded cursor-pointer hover:bg-black/50"
+                              title="Click to toggle your reaction"
                             >
                               {emoji} {Array.isArray(users) ? users.length : users}
                             </span>
@@ -225,16 +322,25 @@ export default function ChatPage() {
                         </div>
                       )}
 
-                      {/* Hover actions */}
+                      {/* Hover actions: emoji buttons next to each message + edit/delete/pin */}
                       {hoveredId === msg.id && (
                         <div className="absolute -top-2 right-0 flex gap-1 bg-zinc-900 border border-zinc-700 rounded px-1 text-sm z-10">
-                          <button onClick={() => toggleReaction(msg.id, '👍')} title="React">👍</button>
-                          <button onClick={() => toggleReaction(msg.id, '❤️')} title="React">❤️</button>
+                          {/* Emoji reaction buttons */}
+                          {QUICK_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => toggleReaction(msg.id, emoji)}
+                              title={`React with ${emoji}`}
+                              className="hover:scale-110 transition px-0.5"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
                           {isOwn && (
-                            <>
-                              <button onClick={() => editMessage(msg)} title="Edit">✏️</button>
-                              <button onClick={() => deleteMessage(msg.id)} title="Delete">🗑️</button>
-                            </>
+                            <button onClick={() => editMessage(msg)} title="Edit">✏️</button>
+                          )}
+                          {(isOwn || isCoach) && (
+                            <button onClick={() => deleteMessage(msg.id)} title="Delete">🗑️</button>
                           )}
                           {isCoach && (
                             <button onClick={() => togglePin(msg.id, !!msg.is_pinned)} title={msg.is_pinned ? 'Unpin' : 'Pin'}>📌</button>
