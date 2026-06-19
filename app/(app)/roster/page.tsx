@@ -46,7 +46,7 @@ export default function RosterPage() {
     position: '',
     jersey_number: '',
     notes: '',
-    family_name: '',
+    name: '',  // family name, matches families.name column
     parent_names: '',
     email: '',
     phone: '',
@@ -162,7 +162,7 @@ export default function RosterPage() {
     setEditingPlayer(null);
     setFormData({
       first_name: '', last_name: '', date_of_birth: '', position: '', jersey_number: '', notes: '',
-      family_name: '', parent_names: '', email: '', phone: '',
+      name: '', parent_names: '', email: '', phone: '',
     });
     setDialogOpen(true);
   };
@@ -176,7 +176,7 @@ export default function RosterPage() {
       position: player.position || '',
       jersey_number: player.jersey_number?.toString() || '',
       notes: player.notes || '',
-      family_name: player.family?.name || '',
+      name: player.family?.name || '',
       parent_names: player.family?.parent_names || '',
       email: player.family?.email || '',
       phone: player.family?.phone || '',
@@ -191,7 +191,7 @@ export default function RosterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.first_name || !formData.last_name || !formData.family_name) {
+    if (!formData.first_name || !formData.last_name || !formData.name) {
       toast.error('First name, last name and family name are required');
       return;
     }
@@ -213,7 +213,7 @@ export default function RosterPage() {
                 ...payload,
                 family: {
                   ...p.family,
-                  name: payload.family_name,
+                  name: payload.name,
                   email: payload.email || null,
                   phone: payload.phone || null,
                   parent_names: payload.parent_names || null,
@@ -235,7 +235,7 @@ export default function RosterPage() {
             notes: payload.notes || null,
             family: {
               id: newFamId,
-              name: payload.family_name,
+              name: payload.name,
               email: payload.email || null,
               phone: payload.phone || null,
               parent_names: payload.parent_names || null,
@@ -250,7 +250,11 @@ export default function RosterPage() {
         toast.success(editingPlayer ? 'Player updated (demo)' : 'Player added (demo)');
       } else {
         if (editingPlayer) {
-          await updatePlayer(editingPlayer.id, payload as any);
+          const updateData = {
+            ...payload,
+            family_name: payload.name,  // map to what updatePlayer expects
+          };
+          await updatePlayer(editingPlayer.id, updateData as any);
           toast.success('Player updated');
         } else {
           // Direct client insert for add player + family. Use safe try/catch + proper field mapping to table columns.
@@ -258,7 +262,7 @@ export default function RosterPage() {
           const supabase = createClient();
 
           try {
-            const famName = (payload.family_name || '').trim();
+            const famName = (payload.name || '').trim();
             if (!famName) throw new Error('Family name is required');
 
             let familyId: string;
@@ -445,7 +449,7 @@ export default function RosterPage() {
                     </div>
                     <div>
                       <Label htmlFor="fam">Family Name *</Label>
-                      <Input id="fam" value={formData.family_name} onChange={e => setFormData({ ...formData, family_name: e.target.value })} required placeholder="Johnson Family" />
+                      <Input id="fam" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} required placeholder="Johnson Family" />
                     </div>
                   </div>
 

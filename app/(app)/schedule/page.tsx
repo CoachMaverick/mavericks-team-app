@@ -91,7 +91,7 @@ export default function SchedulePage() {
       });
       setRosterPlayers(roster);
 
-      // Determine current user's actual family name from profile + roster (so RSVPs use real names e.g. "Brower Family" not "Demo Family")
+      // Determine current user's actual family name from profile + families table (use real family name, not "Demo Family" or "My Family")
       let famName = 'My Family';
       if (isTemp) {
         famName = (roster && roster.length && roster[0]?.family?.name) || 'Johnson Family';
@@ -104,8 +104,18 @@ export default function SchedulePage() {
             .maybeSingle() as any;
           const myFamId = profData?.family_id;
           if (myFamId) {
-            const match = roster.find((p: any) => p.family_id === myFamId);
-            if (match?.family?.name) famName = match.family.name;
+            const { data: famData } = await supabase
+              .from("families")
+              .select("name")
+              .eq("id", myFamId)
+              .maybeSingle() as any;
+            if (famData?.name) {
+              famName = famData.name;
+            } else {
+              // fallback to roster match
+              const match = roster.find((p: any) => p.family_id === myFamId);
+              if (match?.family?.name) famName = match.family.name;
+            }
           }
         } catch (e) {
           console.warn("Schedule RSVP family name lookup:", e);

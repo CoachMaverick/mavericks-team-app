@@ -54,16 +54,7 @@ export function FullCalendarWrapper({
   const [rosterPlayersState, setRosterPlayersState] = useState<any[]>(rosterPlayers || []);
   const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'My Family');
 
-  const playersByFamily = useMemo(() => {
-    const map: Record<string, string[]> = {};
-    rosterPlayersState.forEach((p: any) => {
-      const famName = p.family?.name || 'Unknown';
-      if (!map[famName]) map[famName] = [];
-      const name = `${p.first_name || ''} ${p.last_name || ''}`.trim();
-      if (name) map[famName].push(name);
-    });
-    return map;
-  }, [rosterPlayersState]);
+
 
   // Sync local state when parent re-fetches fresh events from Supabase (e.g. after create)
   useEffect(() => {
@@ -182,7 +173,7 @@ export function FullCalendarWrapper({
       const list = Array.isArray(rsvps) ? rsvps : [];
       setRsvpsByEventState((prev) => ({ ...prev, [eventId]: list }));
 
-      // Recompute counts for this event only (clean logic: only yes/no count as responded for totals; maybe legacy treated as not responded)
+      // Recompute counts for this event only (yes/no only)
       const counts: { yes: number; no: number; maybe: number; total: number } = { yes: 0, no: 0, maybe: 0, total: 0 };
       list.forEach((r: any) => {
         const resp = r?.response;
@@ -192,8 +183,6 @@ export function FullCalendarWrapper({
         } else if (resp === 'no') {
           counts.no = (counts.no || 0) + 1;
           counts.total += 1;
-        } else if (resp === 'maybe') {
-          counts.maybe = (counts.maybe || 0) + 1;
         }
       });
       setRsvpCounts((prev) => ({ ...prev, [eventId]: counts }));
@@ -386,7 +375,7 @@ export function FullCalendarWrapper({
     }
   };
 
-  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no' | 'maybe') => {
+  const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no') => {
     const supabase = createClient();
     try {
       const fam = familyName || currentFamilyNameState || 'My Family';
@@ -554,16 +543,15 @@ export function FullCalendarWrapper({
                   )}
                 </div>
 
-                {/* List of who RSVPed, using roster names if available */}
+                {/* List of who RSVPed (real family names from roster) */}
                 {rsvpsByEventState[selectedEvent.id] && rsvpsByEventState[selectedEvent.id].length > 0 ? (
                   <div className="mb-3 text-xs">
                     <div className="text-muted-foreground mb-1">Who RSVPed:</div>
                     <ul className="space-y-0.5">
                       {rsvpsByEventState[selectedEvent.id].map((r: any, idx: number) => {
-                        const players = playersByFamily[r.family_name] || [];
-                        const display = players.length > 0 ? `${r.family_name} (${players.join(', ')})` : r.family_name;
+                        const display = r.family_name || 'Unknown Family';
                         const resp = r.response;
-                        const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : resp === 'maybe' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
+                        const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                         return (
                           <li key={idx} className="flex justify-between items-center">
                             <span className="truncate">{display}</span>
@@ -577,21 +565,14 @@ export function FullCalendarWrapper({
                   isCoach && <div className="text-xs text-muted-foreground mb-2">No RSVPs yet for this event.</div>
                 )}
 
-                {/* Prominent RSVP buttons */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* Prominent RSVP buttons - only Yes / No */}
+                <div className="grid grid-cols-2 gap-2">
                   <Button 
                     size="sm" 
                     onClick={() => handleRsvp(selectedEvent.id, currentFamilyNameState, 'yes')} 
                     className="bg-green-600 hover:bg-green-700 text-white text-xs py-1"
                   >
                     👍 Yes
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    onClick={() => handleRsvp(selectedEvent.id, currentFamilyNameState, 'maybe')} 
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1"
-                  >
-                    ❓ Maybe
                   </Button>
                   <Button 
                     size="sm" 
@@ -602,7 +583,7 @@ export function FullCalendarWrapper({
                   </Button>
                 </div>
                 <div className="text-[10px] text-center text-muted-foreground mt-1.5">
-                  {isCoach ? "Coach view: see full list above" : "Your response updates counts & list"}
+                  {isCoach ? "Coach can view all RSVPs above" : "RSVP for your family (Yes/No only)"}
                 </div>
               </div>
 
