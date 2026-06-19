@@ -13,12 +13,12 @@ export default function ChatPage() {
   const supabase = createClient();
 
   useEffect(() => {
-    const getUser = async () => {
+    const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
+      loadMessages();
     };
-    getUser();
-    loadMessages();
+    init();
   }, []);
 
   const loadMessages = async () => {
@@ -40,16 +40,19 @@ export default function ChatPage() {
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !currentUser) return;
+    if (!newMessage.trim() || !currentUser) {
+      alert('Please log in to send messages');
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from('messages')
-        .insert({
+        .insert([{
           content: newMessage.trim(),
           user_id: currentUser.id,
           channel: 'team',
-        });
+        }] as any);
 
       if (error) throw error;
 
@@ -57,7 +60,7 @@ export default function ChatPage() {
       loadMessages();
     } catch (err: any) {
       console.error('Send error:', err);
-      alert('Failed to send: ' + (err.message || 'Unknown error'));
+      alert('Failed to send message: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -68,7 +71,7 @@ export default function ChatPage() {
       {error && <p className="text-red-400 mb-4">{error}</p>}
 
       <div className="bg-zinc-900 rounded-2xl h-[650px] flex flex-col border border-zinc-700">
-        <div className="flex-1 p-6 overflow-y-auto space-y-4" id="chat-container">
+        <div className="flex-1 p-6 overflow-y-auto space-y-4">
           {messages.length === 0 ? (
             <p className="text-center text-gray-400 py-12">No messages yet. Start the conversation!</p>
           ) : (
