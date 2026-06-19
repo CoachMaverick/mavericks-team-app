@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from '@/lib/supabase/client';
-import { getInvoices, getRoster, getTeamSettings, updateTeamSettings } from '@/lib/actions';
+import { getInvoices, getRoster, getTeamSettings, updateTeamSettings, getFamilies } from '@/lib/actions';
 import { toast } from "sonner";
 
 interface SafeInvoice {
@@ -49,7 +49,7 @@ export default function AdminPage() {
 
   // Create form
   const [newInvoice, setNewInvoice] = useState({
-    family_id: '',
+    family_id: 'all',
     player_id: '',
     amount: '',
     desc: '',
@@ -101,8 +101,22 @@ export default function AdminPage() {
       }
       setRoster(rosterData);
 
-      // Build unique families from roster
+      // Load families directly (to show all families even without players)
+      let familiesData: any[] = [];
+      try {
+        familiesData = await getFamilies();
+      } catch (e) {
+        console.warn('Families load for admin:', e);
+      }
+
       const famMap: Record<string, RosterFamily> = {};
+      familiesData.forEach((f: any) => {
+        if (f?.id && f.name && !famMap[f.id]) {
+          famMap[f.id] = { id: f.id, name: f.name, email: f.email };
+        }
+      });
+
+      // Also include any from roster (in case)
       rosterData.forEach((p: any) => {
         const f = p.family;
         if (f?.id && f.name && !famMap[f.id]) {
@@ -164,45 +178,54 @@ export default function AdminPage() {
       toast.error('Please fill amount, description and due date');
       return;
     }
-    if (!newInvoice.family_id) {
-      toast.error('Please select a family');
+
+    const isAll = newInvoice.family_id === 'all';
+    const targetFamilies = isAll ? families : (newInvoice.family_id ? families.filter(f => f.id === newInvoice.family_id) : []);
+
+    if (targetFamilies.length === 0) {
+      toast.error('No families selected');
       return;
     }
 
-    const payload: any = {
-      family_id: newInvoice.family_id,
-      player_id: newInvoice.player_id || null,
-      amount_cents: Math.round(amt * 100),
-      description: newInvoice.desc,
-      due_date: newInvoice.due,
-      due_type: newInvoice.due_type,
-      status: 'pending',
-      notes: null,
-    };
-
     try {
-      if (isTemp) {
-        // Persist to shared LS for demo (visible in payments too)
-        const saved = localStorage.getItem('mavericks-demo-invoices');
-        let list: any[] = saved ? JSON.parse(saved) : [];
-        const newInv = {
-          id: 'demo-' + Date.now(),
-          ...payload,
-          created_at: new Date().toISOString(),
-          family: families.find(f => f.id === payload.family_id) || { name: 'Demo Family' },
-          player: roster.find(p => p.id === payload.player_id) || null,
+      let createdCount = 0;
+
+      for (const fam of targetFamilies) {
+        const payload: any = {
+          family_id: fam.id,
+          player_id: isAll ? null : (newInvoice.player_id || null),
+          amount_cents: Math.round(amt * 100),
+          description: newInvoice.desc,
+          due_date: newInvoice.due,
+          due_type: newInvoice.due_type,
+          status: 'pending',
+          notes: null,
         };
-        list = [...list, newInv];
-        localStorage.setItem('mavericks-demo-invoices', JSON.stringify(list));
-        setInvoices(list as SafeInvoice[]);
-        toast.success('Invoice created (demo)');
-      } else {
-        const { error } = await supabase.from('invoices').insert(payload);
-        if (error) throw error;
-        toast.success('Invoice created');
+
+        if (isTemp) {
+          // Persist to shared LS for demo
+          const saved = localStorage.getItem('mavericks-demo-invoices');
+          let list: any[] = saved ? JSON.parse(saved) : [];
+          const newInv = {
+            id: 'demo-' + Date.now() + '-' + fam.id,
+            ...payload,
+            created_at: new Date().toISOString(),
+            family: fam,
+            player: isAll ? null : roster.find(p => p.id === newInvoice.player_id) || null,
+          };
+          list = [...list, newInv];
+          localStorage.setItem('mavericks-demo-invoices', JSON.stringify(list));
+          setInvoices(list as SafeInvoice[]);
+          createdCount++;
+        } else {
+          const { error } = await supabase.from('invoices').insert(payload);
+          if (error) throw error;
+          createdCount++;
+        }
       }
 
-      setNewInvoice({ family_id: '', player_id: '', amount: '', desc: '', due: '', due_type: 'special' });
+      toast.success(`${createdCount} invoice(s) created${isAll ? ' for all families' : ''}`);
+      setNewInvoice({ family_id: 'all', player_id: '', amount: '', desc: '', due: '', due_type: 'special' });
       await load();
       router.refresh();
     } catch (e: any) {
@@ -232,6 +255,7 @@ export default function AdminPage() {
         let list: any[] = saved ? JSON.parse(saved) : [];
         const seen = new Set(list.map((i: any) => `${i.family_id}-${type}-${due}`));
 
+        const toAdd: any[] = [];
         for (const fam of uniqueFamilies) {
           const key = `${fam.id}-${type}-${due}`;
           if (seen.has(key)) continue;
@@ -246,12 +270,15 @@ export default function AdminPage() {
             created_at: new Date().toISOString(),
             family: fam,
           };
-          list.push(newInv);
+          toAdd.push(newInv);
           created++;
           seen.add(key);
         }
-        localStorage.setItem('mavericks-demo-invoices', JSON.stringify(list));
-        setInvoices(list as SafeInvoice[]);
+        if (toAdd.length) {
+          list = [...list, ...toAdd];
+          localStorage.setItem('mavericks-demo-invoices', JSON.stringify(list));
+          setInvoices(list as SafeInvoice[]);
+        }
       } else {
         for (const fam of uniqueFamilies) {
           await supabase.from('invoices').insert({
@@ -434,7 +461,7 @@ export default function AdminPage() {
                   onChange={(e) => setNewInvoice(p => ({ ...p, family_id: e.target.value, player_id: '' }))}
                   className="w-full border rounded px-3 py-2 bg-background"
                 >
-                  <option value="">Select family...</option>
+                  <option value="all">All Families</option>
                   {families.map(f => (
                     <option key={f.id} value={f.id}>{f.name}</option>
                   ))}
@@ -447,9 +474,10 @@ export default function AdminPage() {
                   value={newInvoice.player_id}
                   onChange={(e) => setNewInvoice(p => ({ ...p, player_id: e.target.value }))}
                   className="w-full border rounded px-3 py-2 bg-background"
+                  disabled={newInvoice.family_id === 'all'}
                 >
-                  <option value="">All / Family</option>
-                  {roster.filter(p => !newInvoice.family_id || p.family_id === newInvoice.family_id).map(p => (
+                  <option value="">N/A (family level)</option>
+                  {roster.filter(p => !newInvoice.family_id || newInvoice.family_id === 'all' || p.family_id === newInvoice.family_id).map(p => (
                     <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
                   ))}
                 </select>
