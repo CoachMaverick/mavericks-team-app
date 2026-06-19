@@ -84,6 +84,11 @@ export async function GET(request: Request) {
   }
 
   // Error case - better error message
-  const errorMessage = authError?.message || "Authentication failed. The link may be invalid or expired.";
+  let errorMessage = authError?.message || "Authentication failed. The link may be invalid or expired.";
+  if (errorMessage.toLowerCase().includes("rate") || errorMessage.toLowerCase().includes("too many")) {
+    errorMessage = "Too many attempts — please wait a few minutes before trying again.";
+  } else if (errorMessage.includes("expired") || errorMessage.includes("invalid")) {
+    errorMessage = "Magic link expired or invalid. Please try signing up or logging in again.";
+  }
   return NextResponse.redirect(`${configuredSite}/login?error=${encodeURIComponent(errorMessage)}`);
 }

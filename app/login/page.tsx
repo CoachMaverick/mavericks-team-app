@@ -23,9 +23,13 @@ function LoginContent() {
     const errorParam = searchParams.get("error");
     if (errorParam) {
       const msg = decodeURIComponent(errorParam);
-      const friendly = msg === "auth" ? "Authentication failed or link expired. Please try signing up or logging in again." : msg;
+      let friendly = msg;
+      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
+        friendly = "Too many attempts — please wait a few minutes before trying again.";
+      } else if (msg === "auth" || msg.includes("expired") || msg.includes("invalid")) {
+        friendly = "Authentication failed or link expired. Please try again or use email + password.";
+      }
       toast.error(friendly);
-      // Clean the URL
       const url = new URL(window.location.href);
       url.searchParams.delete("error");
       window.history.replaceState({}, "", url.toString());
@@ -39,11 +43,16 @@ function LoginContent() {
     }
   }, [searchParams]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleEmailPasswordSignup = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email) {
-      toast.error("Please enter your email address");
+    if (!email || !password) {
+      toast.error("Please enter email and password to sign up");
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
 
@@ -52,23 +61,92 @@ function LoginContent() {
     try {
       const supabase = createClient();
 
-      if (password) {
-        // Password login
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-        if (error) throw error;
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-        toast.success("Logged in successfully!");
+      if (error) throw error;
+
+      // Auto-create basic profile for new user
+      if (data.user) {
+        try {
+          const { data: existing } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", data.user.id)
+            .maybeSingle();
+
+          if (!existing) {
+            await supabase.from("profiles").insert({
+              id: data.user.id,
+              email: data.user.email,
+              role: "parent",
+              first_name: "",
+              last_name: "",
+              is_admin: false,
+            } as any);
+          }
+        } catch (profileErr) {
+          console.warn("Profile creation skipped (may already exist):", profileErr);
+        }
+      }
+
+      if (data.session) {
+        // Auto logged in (if email confirmation not required or already confirmed)
+        toast.success("Account created! Welcome to Mavericks 12U.");
         router.push("/dashboard");
         router.refresh();
       } else {
-        // No password - seamless magic link (passwordless)
-        await sendMagicLink(false);
+        // Email confirmation required
+        toast.success("Account created! Check your email to confirm and log in.");
+        setMagicSent(true);
       }
     } catch (err: any) {
-      toast.error(err.message || "Login failed");
+      let msg = err.message || "Signup failed";
+      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
+        msg = "Too many attempts — please wait a few minutes before trying again.";
+      } else if (msg.includes("already registered")) {
+        msg = "This email is already registered. Try logging in instead.";
+      }
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email || !password) {
+      toast.error("Please enter email and password");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const supabase = createClient();
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) throw error;
+
+      toast.success("Logged in successfully!");
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err: any) {
+      let msg = err.message || "Login failed";
+      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
+        msg = "Too many attempts — please wait a few minutes before trying again.";
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -99,17 +177,21 @@ function LoginContent() {
       setMagicSent(true);
       toast.success(
         isSignup
-          ? "Magic link sent! Check your email to create your account and sign in (no password needed)."
-          : "Magic link sent! Check your email to log in automatically."
+          ? "Magic link sent! Check your email to create your account and sign in."
+          : "Magic link sent! Check your email to log in."
       );
     } catch (err: any) {
-      toast.error(err.message || "Failed to send magic link");
+      let msg = err.message || "Failed to send magic link";
+      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
+        msg = "Too many attempts — please wait a few minutes before trying again.";
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // Keep alias for existing calls
+  // Alias for buttons
   const handleMagicLink = sendMagicLink;
 
   return (
@@ -168,7 +250,10 @@ function LoginContent() {
               </button>
             </div>
 
-            <form onSubmit={mode === "login" ? handleLogin : (e) => e.preventDefault()} className="space-y-4">
+            <form 
+              onSubmit={mode === "login" ? handleLogin : handleEmailPasswordSignup} 
+              className="space-y-4"
+            >
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
                   Email address
@@ -187,27 +272,26 @@ function LoginContent() {
                 </div>
               </div>
 
-              {mode === "login" && (
-                <div className="space-y-2">
-                  <label htmlFor="password" className="text-sm font-medium">
-                    Password <span className="text-xs text-muted-foreground">(optional - use magic link for passwordless)</span>
-                  </label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="•••••••• (leave blank for magic link)"
-                  />
-                </div>
-              )}
+              <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium">
+                  Password {mode === "signup" ? "(required for email + password signup)" : "(optional for magic link)"}
+                </label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required={mode === "signup"}
+                />
+              </div>
 
               {mode === "login" ? (
                 <>
                   <Button
                     type="submit"
                     className="mavericks-btn-primary w-full h-11 text-base"
-                    disabled={loading || !email}
+                    disabled={loading || !email || !password}
                   >
                     {loading ? (
                       <>
@@ -215,16 +299,16 @@ function LoginContent() {
                         Logging in...
                       </>
                     ) : (
-                      password ? "Log in with password" : "Send magic link to log in"
+                      "Log in with Email + Password"
                     )}
                   </Button>
 
-                  <div className="relative">
+                  <div className="relative my-4">
                     <div className="absolute inset-0 flex items-center">
                       <span className="w-full border-t" />
                     </div>
                     <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">or</span>
+                      <span className="bg-background px-2 text-muted-foreground">or use magic link (no password)</span>
                     </div>
                   </div>
 
@@ -240,27 +324,45 @@ function LoginContent() {
                 </>
               ) : (
                 <>
-                  {/* Signup flow: magic link emphasis for ease */}
-                  <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                    <strong>No password required.</strong> Enter your email and we'll send a magic link.
-                    Clicking it will create your account with a basic profile and log you in automatically.
-                  </div>
-
+                  {/* Signup: Email + Password primary, magic secondary */}
                   <Button
-                    type="button"
+                    type="submit"
                     className="mavericks-btn-primary w-full h-11 text-base"
-                    onClick={() => handleMagicLink(true)}
-                    disabled={loading || !email}
+                    disabled={loading || !email || !password}
                   >
                     {loading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Sending magic link...
+                        Creating account...
                       </>
                     ) : (
-                      "Send magic link to sign up"
+                      "Sign up with Email + Password"
                     )}
                   </Button>
+
+                  <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">or use magic link (no password)</span>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleMagicLink(true)}
+                    disabled={loading || !email}
+                  >
+                    {loading ? "Sending..." : "Sign up with magic link"}
+                  </Button>
+
+                  <div className="rounded-md bg-blue-50 p-3 text-sm text-blue-700 border border-blue-200">
+                    <strong>Quick start:</strong> Use Email + Password for instant access. 
+                    A basic profile will be created for you automatically. Magic link is available as an alternative.
+                  </div>
 
                   <p className="text-center text-xs text-muted-foreground">
                     Already have an account?{" "}

@@ -84,9 +84,15 @@ export async function GET(request: Request) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    // Error (e.g. invalid/expired token)
+    // Error (e.g. invalid/expired token) - better messages
+    let errorMessage = error.message || "auth";
+    if (errorMessage.toLowerCase().includes("rate") || errorMessage.toLowerCase().includes("too many")) {
+      errorMessage = "Too many attempts — please wait a few minutes before trying again.";
+    } else if (errorMessage.includes("expired") || errorMessage.includes("invalid")) {
+      errorMessage = "Magic link expired or invalid. Please try signing up or logging in again.";
+    }
     return NextResponse.redirect(
-      `${configuredSite}/login?error=${encodeURIComponent(error.message || "auth")}`
+      `${configuredSite}/login?error=${encodeURIComponent(errorMessage)}`
     );
   }
 
