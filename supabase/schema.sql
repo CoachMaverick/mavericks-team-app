@@ -34,7 +34,7 @@ security definer set search_path = public
 as $$
 begin
   insert into public.profiles (id, role, first_name, last_name, has_completed_onboarding)
-  values (new.id, 'parent', '', '', true); -- temporary bypass: auto-skip family setup for all new users
+  values (new.id, 'parent', '', '', false);
   return new;
 end;
 $$;

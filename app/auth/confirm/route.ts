@@ -69,7 +69,7 @@ export async function GET(request: Request) {
             first_name: "",
             last_name: "",
             is_admin: false,
-            has_completed_onboarding: true, // temporary bypass: skip family setup for all on first login
+            has_completed_onboarding: false,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as any);
@@ -87,22 +87,26 @@ export async function GET(request: Request) {
     }
 
     // Normal flows (signup confirm, magic link, etc.): go to dashboard or ?next
-    // Temporary bypass: skip family setup screen for ALL users.
-    // Flag is set to true on profile creation / first login.
+    // Redirect to family prompt only for regular first-time users (to link family_id).
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id) {
-        // ensure flag (in case profile was created without it)
-        try {
+        const userEmail = (user.email || '').toLowerCase();
+        if (userEmail === 'coach@comavericksbaseball.com') {
+          // Admin: always go straight to dashboard, no prompt ever
+        } else {
           const { data: prof } = await supabase
             .from("profiles")
-            .select("has_completed_onboarding")
+            .select("family_id, role, has_completed_onboarding")
             .eq("id", user.id)
             .maybeSingle() as any;
-          if (!prof?.has_completed_onboarding) {
-            await (supabase as any).from("profiles").update({ has_completed_onboarding: true }).eq("id", user.id);
+          const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id)) &&
+            (prof?.role !== 'coach' && prof?.role !== 'admin');
+          if (needsSetup) {
+            const loginUrl = `${configuredSite}/login?prompt=family`;
+            return NextResponse.redirect(loginUrl);
           }
-        } catch {}
+        }
       }
     } catch {}
 

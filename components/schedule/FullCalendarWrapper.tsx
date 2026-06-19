@@ -574,7 +574,7 @@ export function FullCalendarWrapper({
                     <div className="text-muted-foreground mb-1">Who RSVPed:</div>
                     <ul className="space-y-0.5">
                       {rsvpsByEventState[selectedEvent.id].map((r: any, idx: number) => {
-                        const display = r.family_name || 'A Family';
+                        const display = r.family_name || 'Family';
                         const resp = r.response;
                         const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                         return (

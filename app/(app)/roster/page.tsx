@@ -365,7 +365,7 @@ export default function RosterPage() {
             // Also link matching parent profile by email if given (helps parents who sign up later)
             try {
               const { data: { user: curr } } = await supabase.auth.getUser();
-              if (curr) {
+              if (curr && curr.email?.toLowerCase() !== 'coach@comavericksbaseball.com') {
                 const { data: prof } = await (supabase as any)
                   .from('profiles')
                   .select('family_id')

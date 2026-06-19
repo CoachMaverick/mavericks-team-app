@@ -33,7 +33,7 @@ export async function createRsvp(eventId: number | string, playerId: string, sta
     const supabase = isTemp ? await getSupabaseForReadWrite() : await createClient();
 
     // Resolve real family name: prefer profile.family_id -> families.name for signed-in parent
-    let familyName = "Unknown Family";
+    let familyName = '';
     if (isTemp) {
       familyName = "Johnson Family";
     } else {
@@ -56,7 +56,7 @@ export async function createRsvp(eventId: number | string, playerId: string, sta
           }
         }
       } catch {}
-      if (familyName === 'Unknown Family' && playerId) familyName = playerId; // last resort
+      if (!familyName) familyName = 'Family';
     }
 
     // Delete-then-insert = robust upsert (handles vote changes, avoids dup rows)
@@ -411,8 +411,16 @@ export async function getFamilies() {
       { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com' },
     ];
   }
-  const supabase = await createClient();
   try {
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+      let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+      supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+      const supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+      const { data } = await supabase.from('families').select('id, name').order('name');
+      return data || [];
+    }
+    const supabase = await createClient();
     const { data, error } = await supabase.from('families').select('id, name').order('name');
     if (error) throw error;
     return data || [];
@@ -675,7 +683,7 @@ export async function createPlayer(data: {
   // Auto-link the signed-in user to this family if not already linked (for first player / auto)
   try {
     const { data: { user: currUser } } = await supabase.auth.getUser();
-    if (currUser) {
+    if (currUser && currUser.email?.toLowerCase() !== 'coach@comavericksbaseball.com') {
       const { data: prof } = await supabase
         .from('profiles')
         .select('family_id')

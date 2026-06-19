@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Loader2, Mail } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { createClient } from "@/lib/supabase/client";
+import { listAllFamilies, createFamilyAndLink, joinExistingFamily, skipFamilySetup } from '@/lib/actions';
 
 
 export default function LoginContent() {
@@ -18,6 +19,10 @@ export default function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [isSignupMode, setIsSignupMode] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [showFamilySetup, setShowFamilySetup] = useState(false);
+  const [famName, setFamName] = useState('');
+  const [allFamilies, setAllFamilies] = useState<any[]>([]);
+  const [famLoading, setFamLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -63,16 +68,23 @@ export default function LoginContent() {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          // Temporary bypass: always skip family setup screen for ALL users.
-          // Set the flag on first login (or if missing) so it never shows.
-          try {
-            const { data: prof } = await supabase.from('profiles').select('has_completed_onboarding').eq('id', session.user.id).maybeSingle() as any;
-            if (!prof?.has_completed_onboarding) {
-              (supabase as any).from('profiles').update({ has_completed_onboarding: true }).eq('id', session.user.id).catch(() => {});
-            }
-          } catch {}
+          const userEmail = session.user.email?.toLowerCase() || '';
+          const isAdminAccount = userEmail === 'coach@comavericksbaseball.com';
+          if (isAdminAccount) {
+            router.replace("/dashboard");
+            return;
+          }
+          const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', session.user.id).maybeSingle() as any;
+          const forcePrompt = searchParams.get('prompt') === 'family';
+          const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id));
+          if ((needsSetup || forcePrompt) && !isAdminAccount) {
+            setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
+            const fams = await listAllFamilies();
+            setAllFamilies(fams);
+            setShowFamilySetup(true);
+            return;
+          }
           router.replace("/dashboard");
-          return;
         }
       } catch (e) {
         // not authenticated or transient error — stay on login
@@ -127,7 +139,7 @@ export default function LoginContent() {
                 first_name: "",
                 last_name: "",
                 is_admin: false,
-                has_completed_onboarding: true, // temporary bypass: skip family setup for all on first login
+                has_completed_onboarding: false,
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -154,9 +166,13 @@ export default function LoginContent() {
         }
 
         toast.success("Account created and logged in! Welcome to Mavericks 12U.");
-        // Temporary bypass: always redirect (flag set above or in check)
-        router.push('/dashboard');
-        router.refresh();
+        const isAdminSignup = emailTrimmed.toLowerCase() === 'coach@comavericksbaseball.com';
+        if (isAdminSignup) {
+          router.push('/dashboard');
+          router.refresh();
+        } else {
+          await checkAndPromptFamily();
+        }
       } else {
         // Login with Email + Password
         const { error } = await supabase.auth.signInWithPassword({
@@ -182,7 +198,7 @@ export default function LoginContent() {
                 first_name: "",
                 last_name: "",
                 is_admin: false,
-                has_completed_onboarding: true, // temporary bypass: skip family setup for all on first login
+                has_completed_onboarding: false,
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -192,9 +208,13 @@ export default function LoginContent() {
         }
 
         toast.success("Logged in successfully!");
-        // Temporary bypass: always redirect (flag set above or in check)
-        router.push('/dashboard');
-        router.refresh();
+        const isAdminLogin = emailTrimmed.toLowerCase() === 'coach@comavericksbaseball.com';
+        if (isAdminLogin) {
+          router.push('/dashboard');
+          router.refresh();
+        } else {
+          await checkAndPromptFamily();
+        }
       }
     } catch (err: any) {
       let msg = err.message || (isSignupMode ? "Signup failed" : "Login failed");
@@ -239,6 +259,95 @@ export default function LoginContent() {
     }
   };
 
+  const checkAndPromptFamily = async () => {
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const userEmail = user.email?.toLowerCase() || '';
+        const isAdminAccount = userEmail === 'coach@comavericksbaseball.com';
+        if (isAdminAccount) {
+          router.push("/dashboard");
+          return;
+        }
+        const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', user.id).maybeSingle() as any;
+        const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
+        if (needsSetup) {
+          setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
+          const fams = await listAllFamilies();
+          setAllFamilies(fams);
+          setShowFamilySetup(true);
+          return;
+        }
+      }
+    } catch (e) {}
+    router.push("/dashboard");
+  };
+
+  const doCreate = async () => {
+    if (!famName.trim()) {
+      toast.error('Enter a family name');
+      return;
+    }
+    setFamLoading(true);
+    try {
+      await createFamilyAndLink(famName.trim());
+      toast.success('Family created and linked!');
+      router.push('/dashboard');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create family');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doJoin = async (id: string) => {
+    setFamLoading(true);
+    try {
+      await joinExistingFamily(id);
+      toast.success('Joined family!');
+      router.push('/dashboard');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to join');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doJoinByName = async () => {
+    if (!famName.trim()) return;
+    setFamLoading(true);
+    try {
+      const q = famName.trim().toLowerCase();
+      const match = allFamilies.find((f: any) => (f.name || '').toLowerCase().includes(q));
+      if (match) {
+        await joinExistingFamily(match.id);
+        toast.success('Joined family!');
+        router.push('/dashboard');
+      } else {
+        toast.error('Family not found, try Create instead');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Failed');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doSkip = async () => {
+    setFamLoading(true);
+    try {
+      await skipFamilySetup();
+      toast.success("Setup skipped. You can set up your family later from the Roster page.");
+      router.push('/dashboard');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to skip');
+      // still proceed so user isn't stuck
+      router.push('/dashboard');
+    } finally {
+      setFamLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -252,6 +361,7 @@ export default function LoginContent() {
           <p className="text-muted-foreground mt-1 text-sm">Travel Baseball • Team Hub</p>
         </div>
 
+        {!showFamilySetup ? (
         <Card className="mavericks-card">
           <CardHeader>
             <CardTitle className="text-2xl">
@@ -394,6 +504,70 @@ export default function LoginContent() {
               </form>
             </CardContent>
           </Card>
+        ) : (
+          <Card className="mavericks-card border-primary/40">
+            <CardHeader>
+              <CardTitle className="text-2xl">Almost done — set up your family</CardTitle>
+              <CardDescription>
+                Create My Family (recommended) or join existing. This auto-links your profile.family_id so the app shows your real family name everywhere (RSVPs, dashboard, etc).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">Simple for parents: one click to create your family.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        <Dialog open={showFamilySetup} onOpenChange={(open) => {
+          if (!open) {
+            if (showFamilySetup) {
+              skipFamilySetup().catch(() => {});
+            }
+            router.push('/dashboard');
+          }
+          setShowFamilySetup(open);
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Setup Your Family</DialogTitle>
+              <DialogDescription>
+                Create a new family or join an existing one. This links your profile via <span className="font-medium">family_id</span> so RSVPs (Schedule + Dashboard), roster and lists show your actual family name.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Button onClick={doCreate} disabled={famLoading} className="w-full mavericks-btn-primary h-12 text-base font-semibold">
+                {famLoading ? 'Working...' : `Create My Family${famName ? ` (${famName})` : ''}`}
+              </Button>
+              <div className="text-center text-xs text-muted-foreground">or join existing</div>
+              {allFamilies.length > 0 && (
+                <div className="space-y-1 max-h-40 overflow-auto">
+                  {allFamilies.map((f: any) => (
+                    <Button key={f.id} variant="outline" className="w-full" disabled={famLoading} onClick={() => doJoin(f.id)}>
+                      Join {f.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input value={famName} onChange={(e) => setFamName(e.target.value)} placeholder="Family name to join" />
+                <Button onClick={doJoinByName} disabled={famLoading || !famName} variant="outline">Join</Button>
+              </div>
+              <p className="text-[10px] text-center text-muted-foreground">Tip: Use "Create My Family" for the quickest parent setup.</p>
+
+              <div className="pt-2 border-t">
+                <Button
+                  variant="ghost"
+                  onClick={doSkip}
+                  disabled={famLoading}
+                  className="w-full text-muted-foreground hover:text-foreground"
+                >
+                  Skip for now — I'll set up my family later
+                </Button>
+                <p className="text-[10px] text-center text-muted-foreground mt-1">You can complete family setup anytime from the Roster page.</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
           Mavericks 12U Team App
