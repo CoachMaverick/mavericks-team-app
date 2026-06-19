@@ -181,7 +181,7 @@ export default function ChatPage() {
         .update({ is_deleted: true })
         .eq('id', id);
       if (!isCoach) {
-        query = query.eq('sender_id', currentUser.id);
+        query = query.eq('sender_id', currentUser?.id);
       }
       const { error } = await query;
       if (error) throw error;
@@ -264,8 +264,6 @@ export default function ChatPage() {
       alert('Failed to react');
     }
   };
-
-
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
