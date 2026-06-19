@@ -78,6 +78,9 @@ function LoginContent() {
           const forcePrompt = searchParams.get('prompt') === 'family';
           const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id));
           if ((needsSetup || forcePrompt) && !isAdminAccount) {
+            // Mark as seen immediately (so screen only appears once per user, even on dismiss)
+            // Regular users only; admin already filtered
+            (supabase as any).from('profiles').update({ has_completed_onboarding: true }).eq('id', session.user.id).catch(() => {});
             setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
             const fams = await listAllFamilies();
             setAllFamilies(fams);
@@ -276,6 +279,8 @@ function LoginContent() {
         const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', user.id).maybeSingle() as any;
         const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
         if (needsSetup) {
+          // Mark as seen immediately (so screen only appears once per user, even on dismiss)
+          (supabase as any).from('profiles').update({ has_completed_onboarding: true }).eq('id', user.id).catch(() => {});
           setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
           const fams = await listAllFamilies();
           setAllFamilies(fams);
@@ -526,12 +531,8 @@ function LoginContent() {
           </Card>
         )}
 
-        <Dialog open={showFamilySetup} onOpenChange={async (open) => {
+        <Dialog open={showFamilySetup} onOpenChange={(open) => {
           if (!open) {
-            // Treat dialog dismiss (X, esc, click outside) as "skip for now" so prompt doesn't reappear on future logins
-            try {
-              await skipFamilySetup();
-            } catch {}
             router.push('/dashboard');
             router.refresh();
           }
