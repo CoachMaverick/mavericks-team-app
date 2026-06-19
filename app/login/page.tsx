@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,13 +10,34 @@ import { Loader2, Mail } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [magicSent, setMagicSent] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      const msg = decodeURIComponent(errorParam);
+      const friendly = msg === "auth" ? "Authentication failed or link expired. Please try signing up or logging in again." : msg;
+      toast.error(friendly);
+      // Clean the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("error");
+      window.history.replaceState({}, "", url.toString());
+    }
+    const success = searchParams.get("success");
+    if (success) {
+      toast.success("Signed up successfully! You're now logged in.");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("success");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,7 +84,7 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
           shouldCreateUser: isSignup,
         },
       });
@@ -73,7 +94,7 @@ export default function LoginPage() {
       setMagicSent(true);
       toast.success(
         isSignup
-          ? "Magic link sent! Check your email to sign up and log in."
+          ? "Magic link sent! Check your email to create your account and sign in (no password needed)."
           : "Magic link sent! Check your email to log in."
       );
     } catch (err: any) {
@@ -214,8 +235,8 @@ export default function LoginPage() {
                 <>
                   {/* Signup flow: magic link emphasis for ease */}
                   <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                    <strong>Super easy signup:</strong> We'll email you a secure magic link.
-                    Click it to create your account and sign in instantly — no password to create or remember.
+                    <strong>No password required.</strong> Enter your email and we'll send a magic link.
+                    Clicking it will create your account with a basic profile and log you in automatically.
                   </div>
 
                   <Button
@@ -251,8 +272,12 @@ export default function LoginPage() {
               )}
 
               {magicSent && (
-                <div className="text-center text-sm text-green-600 bg-green-50 p-3 rounded-md">
-                  Check your email inbox (and spam folder) for the link!
+                <div className="text-center text-sm text-green-600 bg-green-50 p-3 rounded-md border border-green-200">
+                  {mode === "signup"
+                    ? "We've sent a magic link to your email. Click it to finish signing up (your profile will be created automatically) and you'll be logged in automatically."
+                    : "We've sent a magic link to your email. Click it to log in automatically and be redirected to the dashboard."}
+                  <br />
+                  <span className="text-xs text-muted-foreground">Didn't receive it? Check spam or try again in a minute.</span>
                 </div>
               )}
             </form>
@@ -264,5 +289,13 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }

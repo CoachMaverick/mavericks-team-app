@@ -18,6 +18,33 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Ensure new user has a basic profile (for magic link / first signup via PKCE)
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && user.id) {
+          const { data: existingProfile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          if (!existingProfile) {
+            await supabase.from("profiles").insert({
+              id: user.id,
+              email: user.email,
+              role: "parent",
+              first_name: "",
+              last_name: "",
+              is_admin: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            } as any);
+          }
+        }
+      } catch (profileErr) {
+        console.warn("Profile creation check skipped (non-fatal):", profileErr);
+      }
+
       const forwardedHost = request.headers.get("x-forwarded-host"); // original origin before load balancer
       const isLocalEnv = process.env.NODE_ENV === "development";
       let redirectUrl: string;

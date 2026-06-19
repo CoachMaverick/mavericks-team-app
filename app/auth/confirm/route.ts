@@ -41,6 +41,33 @@ export async function GET(request: Request) {
 
     if (!error) {
       // Session cookies are set by the Supabase server client.
+      // Ensure new user has a basic profile (in case trigger didn't run or for magic link)
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && user.id) {
+          const { data: existingProfile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          if (!existingProfile) {
+            await supabase.from("profiles").insert({
+              id: user.id,
+              email: user.email,
+              role: "parent",
+              first_name: "",
+              last_name: "",
+              is_admin: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            } as any);
+          }
+        }
+      } catch (profileErr) {
+        console.warn("Profile creation check skipped (non-fatal):", profileErr);
+      }
+
       // Redirect the user to the next page (or dashboard).
       const forwardedHost = request.headers.get("x-forwarded-host");
       const isLocalEnv = process.env.NODE_ENV === "development";
