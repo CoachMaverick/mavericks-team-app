@@ -87,8 +87,8 @@ export default function ChatPage() {
       setMessages(filtered);
     } catch (err: any) {
       console.error('Load messages error:', err);
-      // Keep previous messages on transient error; don't wipe UI
-      if (messages.length === 0) setError('Failed to load messages');
+      // Show error banner; previous messages (if any) stay in state. Cleared on next successful load.
+      setError('Failed to load messages');
     } finally {
       setLoading(false);
     }
@@ -265,9 +265,7 @@ export default function ChatPage() {
     }
   };
 
-  const canEdit = (msg: any) => msg.sender_id === currentUser?.id;
-  const canDelete = (msg: any) => msg.sender_id === currentUser?.id || isCoach;
-  const canPin = () => isCoach;
+
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -339,7 +337,7 @@ export default function ChatPage() {
                           {isOwn && (
                             <button onClick={() => editMessage(msg)} title="Edit">✏️</button>
                           )}
-                          {(isOwn || isCoach) && (
+                          {isOwn && (
                             <button onClick={() => deleteMessage(msg.id)} title="Delete">🗑️</button>
                           )}
                           {isCoach && (
