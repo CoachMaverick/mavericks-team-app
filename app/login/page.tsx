@@ -15,6 +15,8 @@ function LoginContent() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSignupMode, setIsSignupMode] = useState(false);
+  const [isResetPassword, setIsResetPassword] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -40,6 +42,14 @@ function LoginContent() {
       toast.success("Signed up successfully! You're now logged in.");
       const url = new URL(window.location.href);
       url.searchParams.delete("success");
+      window.history.replaceState({}, "", url.toString());
+    }
+    const type = searchParams.get("type");
+    if (type === "recovery") {
+      setIsResetPassword(true);
+      setIsSignupMode(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("type");
       window.history.replaceState({}, "", url.toString());
     }
   }, [searchParams]);
@@ -104,9 +114,11 @@ function LoginContent() {
         });
 
         if (signInError) {
-          // Proceed anyway for seamless signup (profile created); if confirmation still required by Supabase, user may see login on redirect
           if (signInError.message.toLowerCase().includes("confirm") || signInError.message.toLowerCase().includes("not confirmed")) {
-            toast.success("Account created! Logging you in...");
+            // Confirmation may be required by Supabase settings; profile created, switch to login
+            toast.success("Account created! Please log in (check email if confirmation required).");
+            setIsSignupMode(false);
+            return;
           } else {
             throw signInError;
           }
@@ -123,6 +135,31 @@ function LoginContent() {
         });
         if (error) throw error;
 
+        // Auto-create basic profile if missing (for first login of existing auth users)
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: existing } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("id", user.id)
+              .maybeSingle();
+            if (!existing) {
+              await supabase.from("profiles").insert({
+                id: user.id,
+                email: user.email,
+                role: "parent",
+                first_name: "",
+                last_name: "",
+                is_admin: false,
+                created_at: new Date().toISOString(),
+              } as any);
+            }
+          }
+        } catch (profileErr) {
+          console.warn("Profile check on login skipped:", profileErr);
+        }
+
         toast.success("Logged in successfully!");
         router.push("/dashboard");
         router.refresh();
@@ -136,6 +173,57 @@ function LoginContent() {
       } else if (msg.includes("Invalid login credentials")) {
         msg = "Invalid email or password. Please try again.";
       }
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!email) {
+      toast.error("Please enter your email address to reset password");
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/auth/confirm?type=recovery`,
+      });
+      if (error) throw error;
+      toast.success("Password reset link sent! Check your email.");
+    } catch (err: any) {
+      let msg = err.message || "Failed to send reset link";
+      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
+        msg = "Too many attempts — please wait a few minutes before trying again.";
+      }
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPassword || resetPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({ password: resetPassword });
+      if (error) throw error;
+      toast.success("Password updated successfully! Please log in.");
+      // End recovery session
+      await supabase.auth.signOut().catch(() => {});
+      setIsResetPassword(false);
+      setResetPassword("");
+      setPassword(""); // clear
+      // Stay on login
+      router.push("/login");
+    } catch (err: any) {
+      let msg = err.message || "Failed to reset password";
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -246,6 +334,14 @@ function LoginContent() {
                 </div>
               )}
 
+              {!isSignupMode && !isResetPassword && (
+                <p className="text-center text-xs">
+                  <button type="button" onClick={handlePasswordReset} className="underline text-muted-foreground hover:text-foreground" disabled={loading || !email}>
+                    Forgot your password?
+                  </button>
+                </p>
+              )}
+
               <p className="text-center text-xs text-muted-foreground">
                 {isSignupMode ? (
                   <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(false)}>Log in instead</button></>
@@ -253,6 +349,23 @@ function LoginContent() {
                   <>New here? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(true)}>Sign up with email + password</button></>
                 )}
               </p>
+
+              {isResetPassword && (
+                <form onSubmit={handleResetPassword} className="space-y-4 pt-4 border-t">
+                  <div className="text-sm text-muted-foreground">Enter your new password.</div>
+                  <Input
+                    type="password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="New password (min 6 chars)"
+                    required
+                  />
+                  <div className="flex gap-2">
+                    <Button type="submit" className="flex-1" disabled={loading || !resetPassword}>Update Password</Button>
+                    <Button type="button" variant="outline" onClick={() => { setIsResetPassword(false); setResetPassword(""); }}>Cancel</Button>
+                  </div>
+                </form>
+              )}
             </form>
           </CardContent>
         </Card>

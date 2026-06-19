@@ -81,6 +81,10 @@ export async function GET(request: Request) {
         redirectUrl = `${configuredSite}${next}`;
       }
 
+      if (type === 'recovery') {
+        // For password reset, redirect to login with recovery flag so we can show new password form (session is set for recovery)
+        return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
+      }
       return NextResponse.redirect(redirectUrl);
     }
 
