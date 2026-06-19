@@ -437,12 +437,31 @@ export async function listAllFamilies() {
 }
 
 export async function createFamilyAndLink(name: string) {
-  const supabase = await getSupabaseForReadWrite();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Get user with normal client (to respect session)
+  const authClient = await createClient();
+  const { data: { user } } = await authClient.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+
+  // For creating family (onboarding for parents), prefer service role to bypass RLS
+  // (parents are not coaches so normal RLS would block insert to families).
+  // Falls back for setups without service key.
+  let supabase;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+    let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+    supabase = createSupabaseJs(
+      supaUrl,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    ) as any;
+  } else {
+    supabase = await getSupabaseForReadWrite();
+  }
+
   const { data: newFam, error } = await supabase.from('families').insert({ name: name.trim() }).select('id').single();
   if (error || !newFam) throw error || new Error('Failed to create family');
-  await (supabase as any).from('profiles').update({ family_id: newFam.id, has_completed_onboarding: true }).eq('id', user.id);
+  await supabase.from('profiles').update({ family_id: newFam.id, has_completed_onboarding: true }).eq('id', user.id);
   return { id: newFam.id, name };
 }
 

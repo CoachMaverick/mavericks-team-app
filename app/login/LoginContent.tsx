@@ -78,9 +78,6 @@ export default function LoginContent() {
           const forcePrompt = searchParams.get('prompt') === 'family';
           const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id));
           if ((needsSetup || forcePrompt) && !isAdminAccount) {
-            // Mark done on first show (via skip action) so prompt appears exactly once for regular users on first login.
-            // Skip button will also invoke it with UX.
-            skipFamilySetup().catch(() => {});
             setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
             const fams = await listAllFamilies();
             setAllFamilies(fams);
@@ -273,15 +270,11 @@ export default function LoginContent() {
         const isAdminAccount = userEmail === 'coach@comavericksbaseball.com';
         if (isAdminAccount) {
           router.push("/dashboard");
-          router.refresh();
           return;
         }
         const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', user.id).maybeSingle() as any;
         const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
         if (needsSetup) {
-          // Mark done on first show (via skip action) so prompt appears exactly once for regular users on first login.
-          // Skip button will also invoke it with UX.
-          skipFamilySetup().catch(() => {});
           setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
           const fams = await listAllFamilies();
           setAllFamilies(fams);
@@ -291,8 +284,8 @@ export default function LoginContent() {
       }
     } catch (e) {}
     router.push("/dashboard");
-    router.refresh();
   };
+
 
   const doCreate = async () => {
     if (!famName.trim()) {
@@ -304,7 +297,6 @@ export default function LoginContent() {
       await createFamilyAndLink(famName.trim());
       toast.success('Family created and linked!');
       router.push('/dashboard');
-      router.refresh();
     } catch (e: any) {
       toast.error(e.message || 'Failed to create family');
     } finally {
@@ -318,7 +310,6 @@ export default function LoginContent() {
       await joinExistingFamily(id);
       toast.success('Joined family!');
       router.push('/dashboard');
-      router.refresh();
     } catch (e: any) {
       toast.error(e.message || 'Failed to join');
     } finally {
@@ -335,7 +326,6 @@ export default function LoginContent() {
         await joinExistingFamily(match.id);
         toast.success('Joined family!');
         router.push('/dashboard');
-        router.refresh();
       } else {
         toast.error('Family not found, try Create instead');
       }
@@ -352,12 +342,10 @@ export default function LoginContent() {
       await skipFamilySetup();
       toast.success("Setup skipped. You can set up your family later from the Roster page.");
       router.push('/dashboard');
-      router.refresh();
     } catch (e: any) {
       toast.error(e.message || 'Failed to skip');
       // still proceed so user isn't stuck
       router.push('/dashboard');
-      router.refresh();
     } finally {
       setFamLoading(false);
     }
@@ -534,8 +522,12 @@ export default function LoginContent() {
 
         <Dialog open={showFamilySetup} onOpenChange={(open) => {
           if (!open) {
+            // Treat dismiss of the family setup prompt as "done" for this first login (so it shows exactly once).
+            // The explicit "Skip for now", create, and join also set the flag.
+            if (showFamilySetup) {
+              skipFamilySetup().catch(() => {});
+            }
             router.push('/dashboard');
-            router.refresh();
           }
           setShowFamilySetup(open);
         }}>
