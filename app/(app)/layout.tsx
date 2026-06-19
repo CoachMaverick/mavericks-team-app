@@ -51,14 +51,16 @@ export default async function AppLayout({
       profile = null;
     }
 
-    // Force admin rights for the coach email as fallback (even if profile.is_admin is missing/false)
+    // Force full Admin access for coach@comavericksbaseball.com (temporary bypass)
     if (realUser && realUser.email?.toLowerCase() === "coach@comavericksbaseball.com") {
       if (!profile) {
-        profile = { role: "admin", is_admin: true };
-      } else {
-        profile.role = "admin";
-        profile.is_admin = true;
+        profile = {};
       }
+      profile.is_admin = true;
+      profile.role = "admin";
+      // Mark profile as "completed" so welcome banners are hidden
+      if (!profile.first_name) profile.first_name = "Coach";
+      if (!profile.last_name) profile.last_name = "Maverick";
     }
 
     // When real admin (is_admin=true) detected, we do not use temp bypass.
@@ -94,7 +96,8 @@ export default async function AppLayout({
       : user.email?.split("@")[0] || "Teammate";
 
   // Friendly first-time message for brand new signups (profile exists but names empty)
-  const isFirstTime = profile && !profile.first_name && !profile.last_name;
+  // Never show for forced admins (coach email)
+  const isFirstTime = !isRealAdmin && profile && !profile.first_name && !profile.last_name;
 
   return (
     <div className="min-h-screen bg-background">

@@ -64,6 +64,21 @@ export default function AdminPage() {
   const supabase = React.useMemo(() => createClient(), []);
   const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
 
+  // Temporary bypass: force full admin for this email even if profile not synced
+  const [forcedAdmin, setForcedAdmin] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email?.toLowerCase() === 'coach@comavericksbaseball.com') {
+          setForcedAdmin(true);
+        }
+      } catch {}
+    })();
+  }, [supabase]);
+
+  const hasFullAdminAccess = forcedAdmin || isTemp;
+
   const load = async () => {
     setLoading(true);
     setLoadError(null);

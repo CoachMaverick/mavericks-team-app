@@ -65,6 +65,21 @@ function PaymentsContent() {
   const [partialAmount, setPartialAmount] = useState('');
   const [partialNote, setPartialNote] = useState('');
 
+  const supabase = createClient();
+
+  // Temporary bypass: force full admin/coach permissions for coach email
+  const [isForcedAdmin, setIsForcedAdmin] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email?.toLowerCase() === 'coach@comavericksbaseball.com') {
+          setIsForcedAdmin(true);
+        }
+      } catch {}
+    })();
+  }, [supabase]);
+
   // For temp mode display
   const mockFamilyName = 'Maverick Family (Temp)';
 

@@ -101,8 +101,10 @@ export default function RosterPage() {
         const supabase = createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single() as any;
-          setIsCoach(profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true);
+          const { data: profile } = await supabase.from('profiles').select('role, is_admin').eq('id', user.id).single() as any;
+          let coach = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+          if (user.email?.toLowerCase() === 'coach@comavericksbaseball.com') coach = true;
+          setIsCoach(coach);
         }
       } catch {
         setIsCoach(false);

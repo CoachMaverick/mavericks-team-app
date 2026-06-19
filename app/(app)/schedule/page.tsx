@@ -47,6 +47,7 @@ export default function SchedulePage() {
               prof = null;
             }
             coach = (prof as any)?.role === 'coach' || (prof as any)?.role === 'admin' || (prof as any)?.is_admin === true;
+            if (user?.email?.toLowerCase() === 'coach@comavericksbaseball.com') coach = true;
           }
         } catch (e: any) {
           console.error("Schedule error:", e);
