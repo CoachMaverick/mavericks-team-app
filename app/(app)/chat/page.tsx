@@ -146,15 +146,23 @@ export default function ChatPage() {
         reactions[emoji].push(uid);
       }
 
+      // Optimistic update for immediate UI feedback
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === id ? { ...m, reactions } : m
+        )
+      );
+
       const { error } = await (supabase as any)
         .from('messages')
         .update({ reactions })
         .eq('id', id);
       if (error) throw error;
-      loadMessages();
+      // Realtime + load will keep in sync; no forced reload needed for speed
     } catch (err: any) {
       console.error('Reaction error:', err);
       alert(`Reacted with ${emoji}`);
+      loadMessages(); // revert on failure
     }
   };
 
@@ -240,15 +248,10 @@ export default function ChatPage() {
                         </div>
                       )}
 
-                      {/* Action buttons on hover - nicely beneath */}
+                      {/* Hover actions - clean management buttons beneath reactions */}
                       <div
-                        className={`hidden group-hover:flex items-center gap-1 text-sm ${isOwn ? 'justify-end' : 'justify-start'} pl-0.5`}
+                        className={`hidden group-hover:flex items-center gap-1 text-sm bg-zinc-900/60 rounded px-1 ${isOwn ? 'justify-end' : 'justify-start'} -mx-1`}
                       >
-                        {/* React */}
-                        <button onClick={() => toggleReaction(msg.id, '❤️')} title="React ❤️" className="px-1.5 py-0.5 hover:bg-zinc-700 rounded transition">❤️</button>
-                        <button onClick={() => toggleReaction(msg.id, '👍')} title="React 👍" className="px-1.5 py-0.5 hover:bg-zinc-700 rounded transition">👍</button>
-                        <button onClick={() => toggleReaction(msg.id, '👏')} title="React 👏" className="px-1.5 py-0.5 hover:bg-zinc-700 rounded transition">👏</button>
-
                         {/* Edit (own only) */}
                         {isOwn && (
                           <button onClick={() => editMessage(msg)} title="Edit" className="px-1.5 py-0.5 hover:bg-zinc-700 rounded transition">✏️</button>
