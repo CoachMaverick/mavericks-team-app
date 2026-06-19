@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Search, Users } from 'lucide-react';
-import { getRoster, createPlayer, updatePlayer, deletePlayer } from '@/lib/actions';
+import { getRoster, updatePlayer, deletePlayer } from '@/lib/actions';
 
 interface RosterPlayer {
   id: string;
@@ -258,12 +258,75 @@ export default function RosterPage() {
           await updatePlayer(editingPlayer.id, updateData as any);
           toast.success('Player updated');
         } else {
-          const createData = {
-            ...payload,
-            family_name: payload.name || `${payload.last_name} Family`,
-          };
-          await createPlayer(createData as any);
-          toast.success('Player added to roster');
+          const { createClient } = await import('@/lib/supabase/client');
+          const supabase = createClient();
+
+          try {
+            const famName = payload.name || `${payload.last_name} Family`;
+
+            let familyId: string;
+
+            // Find or create family safely, using correct columns (name not family_name)
+            const { data: existingFam } = await (supabase as any)
+              .from('families')
+              .select('id')
+              .ilike('name', famName)
+              .limit(1)
+              .maybeSingle();
+
+            if (existingFam?.id) {
+              familyId = existingFam.id;
+              // Update contacts if provided (correct columns)
+              if (payload.email || payload.phone || payload.parent_names) {
+                await (supabase as any)
+                  .from('families')
+                  .update({
+                    email: payload.email || null,
+                    phone: payload.phone || null,
+                    parent_names: payload.parent_names || null,
+                  } as any)
+                  .eq('id', familyId);
+              }
+            } else {
+              const { data: newFam, error: famErr } = await (supabase as any)
+                .from('families')
+                .insert({
+                  name: famName,  // correct column: name (not family_name)
+                  email: payload.email || null,
+                  phone: payload.phone || null,
+                  parent_names: payload.parent_names || null,
+                } as any)
+                .select('id')
+                .single();
+
+              if (famErr || !newFam?.id) {
+                throw new Error(famErr?.message || 'Failed to create family');
+              }
+              familyId = newFam.id;
+            }
+
+            // Insert player linked to family
+            const { error: playerErr } = await (supabase as any)
+              .from('players')
+              .insert({
+                family_id: familyId,
+                first_name: (payload.first_name || '').trim(),
+                last_name: (payload.last_name || '').trim(),
+                date_of_birth: payload.date_of_birth || null,
+                position: payload.position || null,
+                jersey_number: payload.jersey_number || null,
+                notes: payload.notes || null,
+                is_active: true,
+              } as any);
+
+            if (playerErr) {
+              throw new Error(playerErr.message || 'Failed to add player');
+            }
+
+            toast.success('Player added to roster');
+          } catch (insertErr: any) {
+            throw new Error(insertErr?.message || 'Failed to create player and/or family');
+          }
         }
         await loadRoster();
       }

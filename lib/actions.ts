@@ -516,9 +516,10 @@ export async function createPlayer(data: {
 }) {
   const supabase = await getSupabaseForReadWrite();
 
-  if (!data.first_name || !data.last_name || !data.family_name) {
-    throw new Error('Player name and family name are required');
+  if (!data.first_name || !data.last_name) {
+    throw new Error('First name and last name are required');
   }
+  const familyNameForFam = data.family_name || `${data.last_name} Family`;
 
   const cookieStore = await cookies();
   const isTemp = cookieStore.get("temp-coach")?.value === "1";
@@ -534,7 +535,7 @@ export async function createPlayer(data: {
   const { data: existingFam } = await supabase
     .from('families')
     .select('id')
-    .ilike('name', data.family_name)
+    .ilike('name', familyNameForFam)
     .limit(1)
     .maybeSingle();
 
@@ -550,13 +551,46 @@ export async function createPlayer(data: {
     }
   } else {
     const { data: newFam, error: famErr } = await supabase.from('families').insert({
-      name: data.family_name,
+      name: familyNameForFam,
       email: data.email || null,
       phone: data.phone || null,
       parent_names: data.parent_names || null,
     } as any).select('id').single();
     if (famErr || !newFam) throw new Error('Failed to create family');
     familyId = newFam.id;
+  }
+
+  // Auto-link the signed-in user to this family if not already linked (for first player / auto)
+  try {
+    const { data: { user: currUser } } = await supabase.auth.getUser();
+    if (currUser) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('family_id')
+        .eq('id', currUser.id)
+        .maybeSingle() as any;
+      if (!prof?.family_id) {
+        await supabase.from('profiles').update({ family_id: familyId } as any).eq('id', currUser.id);
+      }
+    }
+  } catch (linkErr) {
+    console.warn('Failed to auto-link user to family:', linkErr);
+  }
+
+  // Also link by email if provided in family contact (e.g. the parent's email)
+  if (data.email) {
+    try {
+      const { data: parentProf } = await supabase
+        .from('profiles')
+        .select('id, family_id')
+        .eq('email', data.email)
+        .maybeSingle() as any;
+      if (parentProf && !parentProf.family_id) {
+        await supabase.from('profiles').update({ family_id: familyId } as any).eq('id', parentProf.id);
+      }
+    } catch (emailLinkErr) {
+      console.warn('Failed to auto-link parent by email to family:', emailLinkErr);
+    }
   }
 
   // Insert player

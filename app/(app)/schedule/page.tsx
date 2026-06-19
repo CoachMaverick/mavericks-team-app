@@ -89,7 +89,7 @@ export default function SchedulePage() {
         return [] as any[];
       });
 
-      // Determine current user's actual family name from profile + families table (use real family name, not "Demo Family" or "My Family")
+      // Determine current user's actual family name from profile + families table (use real family name)
       let famName = '';
       if (isTemp) {
         famName = (roster && roster.length && roster[0]?.family?.name) || 'Johnson Family';
