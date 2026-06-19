@@ -79,10 +79,10 @@ export async function GET(request: Request) {
     }
 
     // For password recovery: the verified session is a temporary recovery session.
-    // Send the user to the login page which will present the "set new password" form.
-    // After they successfully update the password we will keep them logged in.
+    // Send the user to the dedicated reset password page to enter a new password.
+    // After they successfully update the password they will be logged in and sent to the dashboard.
     if (type === 'recovery') {
-      return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
+      return NextResponse.redirect(`${configuredSite}/auth/reset-password`);
     }
 
     // Normal flows (signup confirm, magic link, etc.): go to dashboard or ?next

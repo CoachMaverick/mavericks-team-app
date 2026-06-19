@@ -68,9 +68,9 @@ export async function GET(request: Request) {
       console.warn("Profile creation check skipped (non-fatal):", profileErr);
     }
 
-    // For password recovery links, send user to the reset password form (session is a temporary recovery session)
+    // For password recovery links, send user to the dedicated reset password page.
     if (type === 'recovery') {
-      return NextResponse.redirect(`${configuredSite}/login?type=recovery`);
+      return NextResponse.redirect(`${configuredSite}/auth/reset-password`);
     }
 
     // Auto-redirect to dashboard (or next param) - user is now logged in
