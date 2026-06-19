@@ -378,6 +378,15 @@ export async function getRsvpsForEvents(eventIds: (number | string)[]): Promise<
 // =====================================================
 
 export async function getFamilies() {
+  const cookieStore = await cookies();
+  const isTemp = cookieStore.get("temp-coach")?.value === "1";
+  if (isTemp) {
+    // Demo families for temp
+    return [
+      { id: 'fam1', name: 'Johnson Family', email: 'johnson.parent@email.com' },
+      { id: 'fam2', name: 'Martinez Family', email: 'martinez@email.com' },
+    ];
+  }
   const supabase = await createClient();
   try {
     const { data, error } = await supabase.from('families').select('id, name').order('name');

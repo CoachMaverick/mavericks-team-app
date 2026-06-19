@@ -107,7 +107,18 @@ export default function RosterPage() {
           setIsCoach(coach);
         }
       } catch {
-        setIsCoach(false);
+        try {
+          const { createClient } = await import('@/lib/supabase/client');
+          const sb = createClient();
+          const { data: { user: u } } = await sb.auth.getUser();
+          if (u?.email?.toLowerCase() === 'coach@comavericksbaseball.com') {
+            setIsCoach(true);
+          } else {
+            setIsCoach(false);
+          }
+        } catch {
+          setIsCoach(false);
+        }
       }
     };
     loadRole();

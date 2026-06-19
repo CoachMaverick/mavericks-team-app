@@ -53,8 +53,14 @@ export default function LoginPage() {
         }
         // For demo email, fall back to demo mode below
       } else if (data.user) {
-        // Real login succeeded. Fetch profile to prioritize is_admin = true
-        document.cookie = "temp-coach=; path=/; max-age=0";
+        // Real login succeeded.
+        // For the special coach email, set temp-coach cookie to enable service-role bypass for data (same as demo)
+        // This gives full admin access even if DB profile not synced.
+        if (data.user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+          document.cookie = "temp-coach=1; path=/; max-age=86400";
+        } else {
+          document.cookie = "temp-coach=; path=/; max-age=0";
+        }
 
         // Explicitly refresh the user session
         try {

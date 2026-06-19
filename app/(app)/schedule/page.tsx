@@ -27,12 +27,14 @@ export default function SchedulePage() {
       const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
 
       let coach = isTemp;
+      let currentUser: any = null;
       if (!isTemp) {
         try {
           const { data: { user } } = await supabase.auth.getUser().catch((e: any) => {
             console.error("Schedule error:", e);
             return { data: { user: null } };
           });
+          currentUser = user;
           if (user) {
             let prof: any = null;
             try {
@@ -52,6 +54,7 @@ export default function SchedulePage() {
         } catch (e: any) {
           console.error("Schedule error:", e);
           coach = false;
+          if (currentUser?.email?.toLowerCase() === 'coach@comavericksbaseball.com') coach = true;
         }
       }
       setIsCoach(coach);
