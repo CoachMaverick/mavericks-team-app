@@ -64,16 +64,8 @@ function LoginContent() {
         router.push("/dashboard");
         router.refresh();
       } else {
-        // No password provided - seamless magic link login (no pw required)
-        const { error } = await supabase.auth.signInWithOtp({
-          email: email.trim(),
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
-        });
-        if (error) throw error;
-        setMagicSent(true);
-        toast.success("Magic link sent! Check your email to log in automatically.");
+        // No password - seamless magic link (passwordless)
+        await sendMagicLink(false);
       }
     } catch (err: any) {
       toast.error(err.message || "Login failed");
@@ -82,7 +74,7 @@ function LoginContent() {
     }
   };
 
-  const handleMagicLink = async (isSignup: boolean = false) => {
+  const sendMagicLink = async (isSignup: boolean = false) => {
     if (!email) {
       toast.error("Please enter your email address");
       return;
@@ -108,7 +100,7 @@ function LoginContent() {
       toast.success(
         isSignup
           ? "Magic link sent! Check your email to create your account and sign in (no password needed)."
-          : "Magic link sent! Check your email to log in."
+          : "Magic link sent! Check your email to log in automatically."
       );
     } catch (err: any) {
       toast.error(err.message || "Failed to send magic link");
@@ -116,6 +108,9 @@ function LoginContent() {
       setLoading(false);
     }
   };
+
+  // Keep alias for existing calls
+  const handleMagicLink = sendMagicLink;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
