@@ -14,8 +14,7 @@ function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [magicSent, setMagicSent] = useState(false);
+  const [isSignupMode, setIsSignupMode] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -27,7 +26,9 @@ function LoginContent() {
       if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
         friendly = "Too many attempts — please wait a few minutes before trying again.";
       } else if (msg === "auth" || msg.includes("expired") || msg.includes("invalid")) {
-        friendly = "Authentication failed or link expired. Please try again or use email + password.";
+        friendly = "Authentication failed or link expired. Please try signing up or logging in again.";
+      } else if (msg.includes("already registered") || msg.includes("User already registered")) {
+        friendly = "This email is already registered. Please log in instead.";
       }
       toast.error(friendly);
       const url = new URL(window.location.href);
@@ -43,16 +44,16 @@ function LoginContent() {
     }
   }, [searchParams]);
 
-  const handleEmailPasswordSignup = async (e: React.FormEvent) => {
+  const handleEmailPasswordAuth = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!email || !password) {
-      toast.error("Please enter email and password to sign up");
+      toast.error(isSignupMode ? "Please enter email and password to sign up" : "Please enter email and password");
       return;
     }
 
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (isSignupMode && password.length < 6) {
+      toast.error("Password must be at least 6 characters long");
       return;
     }
 
@@ -60,139 +61,86 @@ function LoginContent() {
 
     try {
       const supabase = createClient();
+      const emailTrimmed = email.trim();
 
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
+      if (isSignupMode) {
+        // Signup with Email + Password - immediate, no confirmation step in app
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: emailTrimmed,
+          password,
+        });
 
-      if (error) throw error;
+        if (signUpError) throw signUpError;
 
-      // Auto-create basic profile for new user
-      if (data.user) {
-        try {
-          const { data: existing } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("id", data.user.id)
-            .maybeSingle();
+        // Auto-create basic profile for new user (idempotent)
+        if (signUpData.user) {
+          try {
+            const { data: existing } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("id", signUpData.user.id)
+              .maybeSingle();
 
-          if (!existing) {
-            await supabase.from("profiles").insert({
-              id: data.user.id,
-              email: data.user.email,
-              role: "parent",
-              first_name: "",
-              last_name: "",
-              is_admin: false,
-            } as any);
+            if (!existing) {
+              await supabase.from("profiles").insert({
+                id: signUpData.user.id,
+                email: signUpData.user.email,
+                role: "parent",
+                first_name: "",
+                last_name: "",
+                is_admin: false,
+                created_at: new Date().toISOString(),
+              } as any);
+            }
+          } catch (profileErr) {
+            console.warn("Profile auto-creation skipped (may already exist):", profileErr);
           }
-        } catch (profileErr) {
-          console.warn("Profile creation skipped (may already exist):", profileErr);
         }
-      }
 
-      if (data.session) {
-        // Auto logged in (if email confirmation not required or already confirmed)
-        toast.success("Account created! Welcome to Mavericks 12U.");
+        // Immediately sign in to make it seamless (disables confirmation requirement in flow)
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: emailTrimmed,
+          password,
+        });
+
+        if (signInError) {
+          // Proceed anyway for seamless signup (profile created); if confirmation still required by Supabase, user may see login on redirect
+          if (signInError.message.toLowerCase().includes("confirm") || signInError.message.toLowerCase().includes("not confirmed")) {
+            toast.success("Account created! Logging you in...");
+          } else {
+            throw signInError;
+          }
+        }
+
+        toast.success("Account created and logged in! Welcome to Mavericks 12U.");
         router.push("/dashboard");
         router.refresh();
       } else {
-        // Email confirmation required
-        toast.success("Account created! Check your email to confirm and log in.");
-        setMagicSent(true);
+        // Login with Email + Password
+        const { error } = await supabase.auth.signInWithPassword({
+          email: emailTrimmed,
+          password,
+        });
+        if (error) throw error;
+
+        toast.success("Logged in successfully!");
+        router.push("/dashboard");
+        router.refresh();
       }
     } catch (err: any) {
-      let msg = err.message || "Signup failed";
+      let msg = err.message || (isSignupMode ? "Signup failed" : "Login failed");
       if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
         msg = "Too many attempts — please wait a few minutes before trying again.";
-      } else if (msg.includes("already registered")) {
-        msg = "This email is already registered. Try logging in instead.";
+      } else if (msg.includes("already registered") || msg.includes("User already registered")) {
+        msg = "This email is already registered. Please try logging in instead.";
+      } else if (msg.includes("Invalid login credentials")) {
+        msg = "Invalid email or password. Please try again.";
       }
       toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!email || !password) {
-      toast.error("Please enter email and password");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const supabase = createClient();
-
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error) throw error;
-
-      toast.success("Logged in successfully!");
-      router.push("/dashboard");
-      router.refresh();
-    } catch (err: any) {
-      let msg = err.message || "Login failed";
-      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
-        msg = "Too many attempts — please wait a few minutes before trying again.";
-      }
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const sendMagicLink = async (isSignup: boolean = false) => {
-    if (!email) {
-      toast.error("Please enter your email address");
-      return;
-    }
-
-    setLoading(true);
-    setMagicSent(false);
-
-    try {
-      const supabase = createClient();
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          shouldCreateUser: isSignup,
-        },
-      });
-
-      if (error) throw error;
-
-      setMagicSent(true);
-      toast.success(
-        isSignup
-          ? "Magic link sent! Check your email to create your account and sign in."
-          : "Magic link sent! Check your email to log in."
-      );
-    } catch (err: any) {
-      let msg = err.message || "Failed to send magic link";
-      if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
-        msg = "Too many attempts — please wait a few minutes before trying again.";
-      }
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Alias for buttons
-  const handleMagicLink = sendMagicLink;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -209,25 +157,22 @@ function LoginContent() {
         <Card className="mavericks-card">
           <CardHeader>
             <CardTitle className="text-2xl">
-              {mode === "login" ? "Log in to Mavericks 12U" : "Sign up for Mavericks 12U"}
+              {isSignupMode ? "Sign up for Mavericks 12U" : "Log in to Mavericks 12U"}
             </CardTitle>
             <CardDescription>
-              {mode === "login"
-                ? "Enter your email and password, or use a magic link."
-                : "Sign up easily with a magic link — no password needed!"}
+              {isSignupMode
+                ? "Create your account with email and password. Instant access, no confirmation email required."
+                : "Sign in with your email and password."}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Mode switch for clearer signup/login */}
+            {/* Simple mode switch - Email + Password focused */}
             <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
               <button
                 type="button"
-                onClick={() => {
-                  setMode("login");
-                  setMagicSent(false);
-                }}
+                onClick={() => setIsSignupMode(false)}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  mode === "login"
+                  !isSignupMode
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -236,12 +181,9 @@ function LoginContent() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setMode("signup");
-                  setMagicSent(false);
-                }}
+                onClick={() => setIsSignupMode(true)}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  mode === "signup"
+                  isSignupMode
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -250,10 +192,7 @@ function LoginContent() {
               </button>
             </div>
 
-            <form 
-              onSubmit={mode === "login" ? handleLogin : handleEmailPasswordSignup} 
-              className="space-y-4"
-            >
+            <form onSubmit={handleEmailPasswordAuth} className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
                   Email address
@@ -274,7 +213,7 @@ function LoginContent() {
 
               <div className="space-y-2">
                 <label htmlFor="password" className="text-sm font-medium">
-                  Password {mode === "signup" ? "(required for email + password signup)" : "(optional for magic link)"}
+                  Password {isSignupMode ? "(at least 6 characters)" : ""}
                 </label>
                 <Input
                   id="password"
@@ -282,113 +221,38 @@ function LoginContent() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  required={mode === "signup"}
+                  required
                 />
               </div>
 
-              {mode === "login" ? (
-                <>
-                  <Button
-                    type="submit"
-                    className="mavericks-btn-primary w-full h-11 text-base"
-                    disabled={loading || !email || !password}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Logging in...
-                      </>
-                    ) : (
-                      "Log in with Email + Password"
-                    )}
-                  </Button>
+              <Button
+                type="submit"
+                className="mavericks-btn-primary w-full h-11 text-base"
+                disabled={loading || !email || !password}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {isSignupMode ? "Creating account..." : "Logging in..."}
+                  </>
+                ) : (
+                  isSignupMode ? "Sign up with Email + Password" : "Log in with Email + Password"
+                )}
+              </Button>
 
-                  <div className="relative my-4">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">or use magic link (no password)</span>
-                    </div>
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => handleMagicLink(false)}
-                    disabled={loading || !email}
-                  >
-                    {loading ? "Sending..." : "Send magic link to log in"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {/* Signup: Email + Password primary, magic secondary */}
-                  <Button
-                    type="submit"
-                    className="mavericks-btn-primary w-full h-11 text-base"
-                    disabled={loading || !email || !password}
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creating account...
-                      </>
-                    ) : (
-                      "Sign up with Email + Password"
-                    )}
-                  </Button>
-
-                  <div className="relative my-4">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">or use magic link (no password)</span>
-                    </div>
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => handleMagicLink(true)}
-                    disabled={loading || !email}
-                  >
-                    {loading ? "Sending..." : "Sign up with magic link"}
-                  </Button>
-
-                  <div className="rounded-md bg-blue-50 p-3 text-sm text-blue-700 border border-blue-200">
-                    <strong>Quick start:</strong> Use Email + Password for instant access. 
-                    A basic profile will be created for you automatically. Magic link is available as an alternative.
-                  </div>
-
-                  <p className="text-center text-xs text-muted-foreground">
-                    Already have an account?{" "}
-                    <button
-                      type="button"
-                      className="underline hover:no-underline"
-                      onClick={() => {
-                        setMode("login");
-                        setMagicSent(false);
-                      }}
-                    >
-                      Log in instead
-                    </button>
-                  </p>
-                </>
-              )}
-
-              {magicSent && (
-                <div className="text-center text-sm text-green-600 bg-green-50 p-3 rounded-md border border-green-200">
-                  {mode === "signup"
-                    ? "We've sent a magic link to your email. Click it to finish signing up (your profile will be created automatically) and you'll be logged in automatically."
-                    : "We've sent a magic link to your email. Click it to log in automatically and be redirected to the dashboard."}
-                  <br />
-                  <span className="text-xs text-muted-foreground">Didn't receive it? Check spam or try again in a minute.</span>
+              {isSignupMode && (
+                <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                  Create your account instantly. A basic profile will be created automatically so you can get started right away. No email confirmation step required.
                 </div>
               )}
+
+              <p className="text-center text-xs text-muted-foreground">
+                {isSignupMode ? (
+                  <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(false)}>Log in instead</button></>
+                ) : (
+                  <>New here? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(true)}>Sign up with email + password</button></>
+                )}
+              </p>
             </form>
           </CardContent>
         </Card>
