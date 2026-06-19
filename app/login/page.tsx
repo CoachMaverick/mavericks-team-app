@@ -5,10 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Mail } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { createClient } from "@/lib/supabase/client";
+import { listAllFamilies, createFamilyAndLink, joinExistingFamily } from '@/lib/actions';
 
 function LoginContent() {
   const [email, setEmail] = useState("");
@@ -16,6 +18,10 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [isSignupMode, setIsSignupMode] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [showFamilySetup, setShowFamilySetup] = useState(false);
+  const [famName, setFamName] = useState('');
+  const [allFamilies, setAllFamilies] = useState<any[]>([]);
+  const [famLoading, setFamLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -61,6 +67,15 @@ function LoginContent() {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
+          const { data: prof } = await supabase.from('profiles').select('family_id, last_name').eq('id', session.user.id).maybeSingle() as any;
+          const forcePrompt = searchParams.get('prompt') === 'family';
+          if (!prof?.family_id || forcePrompt) {
+            setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
+            const fams = await listAllFamilies();
+            setAllFamilies(fams);
+            setShowFamilySetup(true);
+            return;
+          }
           router.replace("/dashboard");
         }
       } catch (e) {
@@ -69,7 +84,7 @@ function LoginContent() {
     };
     const t = setTimeout(checkExistingSession, 10);
     return () => clearTimeout(t);
-  }, [router]);
+  }, [router, searchParams]);
 
   const handleEmailPasswordAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,8 +157,7 @@ function LoginContent() {
         }
 
         toast.success("Account created and logged in! Welcome to Mavericks 12U.");
-        router.push("/dashboard");
-        router.refresh();
+        await checkAndPromptFamily();
       } else {
         // Login with Email + Password
         const { error } = await supabase.auth.signInWithPassword({
@@ -178,8 +192,7 @@ function LoginContent() {
         }
 
         toast.success("Logged in successfully!");
-        router.push("/dashboard");
-        router.refresh();
+        await checkAndPromptFamily();
       }
     } catch (err: any) {
       let msg = err.message || (isSignupMode ? "Signup failed" : "Login failed");
@@ -224,6 +237,77 @@ function LoginContent() {
     }
   };
 
+  const checkAndPromptFamily = async () => {
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: prof } = await supabase.from('profiles').select('family_id, last_name').eq('id', user.id).maybeSingle() as any;
+        if (!prof?.family_id) {
+          setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
+          const fams = await listAllFamilies();
+          setAllFamilies(fams);
+          setShowFamilySetup(true);
+          return;
+        }
+      }
+    } catch (e) {}
+    router.push("/dashboard");
+    router.refresh();
+  };
+
+  const doCreate = async () => {
+    if (!famName.trim()) {
+      toast.error('Enter a family name');
+      return;
+    }
+    setFamLoading(true);
+    try {
+      await createFamilyAndLink(famName.trim());
+      toast.success('Family created and linked!');
+      router.push('/dashboard');
+      router.refresh();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create family');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doJoin = async (id: string) => {
+    setFamLoading(true);
+    try {
+      await joinExistingFamily(id);
+      toast.success('Joined family!');
+      router.push('/dashboard');
+      router.refresh();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to join');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doJoinByName = async () => {
+    if (!famName.trim()) return;
+    setFamLoading(true);
+    try {
+      const match = allFamilies.find((f: any) => f.name.toLowerCase() === famName.trim().toLowerCase());
+      if (match) {
+        await joinExistingFamily(match.id);
+        toast.success('Joined family!');
+        router.push('/dashboard');
+        router.refresh();
+      } else {
+        toast.error('Family not found, try Create instead');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Failed');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
@@ -236,148 +320,199 @@ function LoginContent() {
           <p className="text-muted-foreground mt-1 text-sm">Travel Baseball • Team Hub</p>
         </div>
 
-        <Card className="mavericks-card">
-          <CardHeader>
-            <CardTitle className="text-2xl">
-              {isSignupMode ? "Create your Mavericks 12U account" : "Log in to Mavericks 12U"}
-            </CardTitle>
-            <CardDescription>
-              {isSignupMode
-                ? "Sign up with email and password for instant access. A profile is created automatically."
-                : "Enter your email and password to access the team hub."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {/* Mode tabs - Email + Password is always primary */}
-            <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
-              <button
-                type="button"
-                onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  !isSignupMode
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Log in
-              </button>
-              <button
-                type="button"
-                onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  isSignupMode
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Sign up
-              </button>
-            </div>
-
-            <form onSubmit={handleEmailPasswordAuth} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">
-                  Email address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (resetEmailSent) setResetEmailSent(false);
-                    }}
-                    className="pl-10"
-                    placeholder="you@example.com"
-                    required
-                  />
-                </div>
+        {!showFamilySetup ? (
+          <Card className="mavericks-card">
+            <CardHeader>
+              <CardTitle className="text-2xl">
+                {isSignupMode ? "Create your Mavericks 12U account" : "Log in to Mavericks 12U"}
+              </CardTitle>
+              <CardDescription>
+                {isSignupMode
+                  ? "Sign up with email and password for instant access. A profile is created automatically."
+                  : "Enter your email and password to access the team hub."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* Mode tabs - Email + Password is always primary */}
+              <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
+                <button
+                  type="button"
+                  onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                    !isSignupMode
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                    isSignupMode
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Sign up
+                </button>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  Password {isSignupMode ? "(min 6 characters)" : ""}
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-                {isSignupMode && (
-                  <p className="text-xs text-muted-foreground">Must be at least 6 characters long.</p>
-                )}
+              <form onSubmit={handleEmailPasswordAuth} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="email" className="text-sm font-medium">
+                    Email address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (resetEmailSent) setResetEmailSent(false);
+                      }}
+                      className="pl-10"
+                      placeholder="you@example.com"
+                      required
+                    />
+                  </div>
+                </div>
 
-                {/* Clear, prominent "Forgot Password?" link — only on login tab */}
-                {!isSignupMode && (
-                  <div className="-mt-1">
-                    {resetEmailSent ? (
-                      <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-400">
-                        Reset link sent to <span className="font-medium">{email}</span>. Check your inbox (and spam).
-                        {" "}
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">
+                    Password {isSignupMode ? "(min 6 characters)" : ""}
+                  </label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                  {isSignupMode && (
+                    <p className="text-xs text-muted-foreground">Must be at least 6 characters long.</p>
+                  )}
+
+                  {/* Clear, prominent "Forgot Password?" link — only on login tab */}
+                  {!isSignupMode && (
+                    <div className="-mt-1">
+                      {resetEmailSent ? (
+                        <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-400">
+                          Reset link sent to <span className="font-medium">{email}</span>. Check your inbox (and spam).
+                          {" "}
+                          <button
+                            type="button"
+                            onClick={handlePasswordReset}
+                            disabled={loading || !email}
+                            className="underline hover:no-underline font-medium disabled:opacity-50"
+                          >
+                            Resend
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={handlePasswordReset}
                           disabled={loading || !email}
-                          className="underline hover:no-underline font-medium disabled:opacity-50"
+                          className="text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Resend
+                          Forgot Password?
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handlePasswordReset}
-                        disabled={loading || !email}
-                        className="text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Forgot Password?
-                      </button>
-                    )}
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <Button
+                  type="submit"
+                  className="mavericks-btn-primary w-full h-11 text-base"
+                  disabled={loading || !email || !password}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {isSignupMode ? "Creating account..." : "Logging in..."}
+                    </>
+                  ) : (
+                    isSignupMode ? "Sign up with Email + Password" : "Log in with Email + Password"
+                  )}
+                </Button>
+
+                {/* Helpful instructions */}
+                {isSignupMode ? (
+                  <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                    Create your account instantly with email + password. A basic parent profile is created automatically. No email confirmation needed to get started.
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground text-center">
+                    Use the email you registered with. Click “Forgot Password?” below if you need a reset link.
                   </div>
                 )}
-              </div>
 
-              <Button
-                type="submit"
-                className="mavericks-btn-primary w-full h-11 text-base"
-                disabled={loading || !email || !password}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {isSignupMode ? "Creating account..." : "Logging in..."}
-                  </>
-                ) : (
-                  isSignupMode ? "Sign up with Email + Password" : "Log in with Email + Password"
-                )}
+                <p className="text-center text-xs text-muted-foreground pt-1">
+                  {isSignupMode ? (
+                    <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}>Log in instead</button></>
+                  ) : (
+                    <>New here? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}>Sign up with email + password</button></>
+                  )}
+                </p>
+              </form>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="mavericks-card border-primary/40">
+            <CardHeader>
+              <CardTitle className="text-2xl">Almost done — set up your family</CardTitle>
+              <CardDescription>
+                Create My Family (recommended) or join existing. This auto-links your profile.family_id so the app shows your real family name everywhere (RSVPs, dashboard, etc).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">Simple for parents: one click to create your family.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        <Dialog open={showFamilySetup} onOpenChange={(open) => {
+          if (!open) {
+            router.push('/dashboard');
+            router.refresh();
+          }
+          setShowFamilySetup(open);
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Setup Your Family</DialogTitle>
+              <DialogDescription>
+                Create a new family or join an existing one. This links your profile via <span className="font-medium">family_id</span> so RSVPs (Schedule + Dashboard), roster and lists show your actual family name.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Button onClick={doCreate} disabled={famLoading} className="w-full mavericks-btn-primary h-12 text-base font-semibold">
+                {famLoading ? 'Working...' : `Create My Family${famName ? ` (${famName})` : ''}`}
               </Button>
-
-              {/* Helpful instructions */}
-              {isSignupMode ? (
-                <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                  Create your account instantly with email + password. A basic parent profile is created automatically. No email confirmation needed to get started.
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground text-center">
-                  Use the email you registered with. Click “Forgot Password?” below if you need a reset link.
+              <div className="text-center text-xs text-muted-foreground">or join existing</div>
+              {allFamilies.length > 0 && (
+                <div className="space-y-1 max-h-40 overflow-auto">
+                  {allFamilies.map((f: any) => (
+                    <Button key={f.id} variant="outline" className="w-full" disabled={famLoading} onClick={() => doJoin(f.id)}>
+                      Join {f.name}
+                    </Button>
+                  ))}
                 </div>
               )}
-
-              <p className="text-center text-xs text-muted-foreground pt-1">
-                {isSignupMode ? (
-                  <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}>Log in instead</button></>
-                ) : (
-                  <>New here? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}>Sign up with email + password</button></>
-                )}
-              </p>
-            </form>
-          </CardContent>
-        </Card>
+              <div className="flex gap-2">
+                <Input value={famName} onChange={(e) => setFamName(e.target.value)} placeholder="Family name to join" />
+                <Button onClick={doJoinByName} disabled={famLoading || !famName} variant="outline">Join</Button>
+              </div>
+              <p className="text-[10px] text-center text-muted-foreground">Tip: Use "Create My Family" for the quickest parent setup.</p>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
           Mavericks 12U Team App

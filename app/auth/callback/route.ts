@@ -74,6 +74,24 @@ export async function GET(request: Request) {
     }
 
     // Auto-redirect to dashboard (or next param) - user is now logged in
+    // But if no family_id on profile (typical for new parents), redirect to /login so the family prompt triggers.
+    // Covers signup/first-login for magic links + Email+PW flows uniformly.
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("family_id, role")
+          .eq("id", user.id)
+          .maybeSingle() as any;
+        const needsFamily = !prof?.family_id && (prof?.role !== 'coach' && prof?.role !== 'admin');
+        if (needsFamily) {
+          const loginUrl = `${configuredSite}/login?prompt=family`;
+          return NextResponse.redirect(loginUrl);
+        }
+      }
+    } catch {}
+
     const forwardedHost = request.headers.get("x-forwarded-host"); // original origin before load balancer
     const isLocalEnv = process.env.NODE_ENV === "development";
     let redirectUrl: string;

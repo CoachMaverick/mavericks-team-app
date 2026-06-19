@@ -10,7 +10,7 @@ export default function SchedulePage() {
   const [events, setEvents] = useState<any[]>([]);
   const [rsvpCounts, setRsvpCounts] = useState<any>({});
   const [rsvpsByEvent, setRsvpsByEvent] = useState<any>({});
-  const [currentFamilyName, setCurrentFamilyName] = useState<string>('Unknown Family');
+  const [currentFamilyName, setCurrentFamilyName] = useState<string>('Family');
   const [isCoach, setIsCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -90,6 +90,7 @@ export default function SchedulePage() {
       });
 
       // Determine current user's actual family name from profile + families table (use real family name)
+      // This powers the RSVP Yes/No buttons + display. Prioritize profile.family_id -> families.name
       let famName = '';
       if (isTemp) {
         famName = (roster && roster.length && roster[0]?.family?.name) || 'Johnson Family';
@@ -97,7 +98,7 @@ export default function SchedulePage() {
         try {
           const { data: profData } = await supabase
             .from("profiles")
-            .select("family_id")
+            .select("family_id, last_name")
             .eq("id", currentUser.id)
             .maybeSingle() as any;
           const myFamId = profData?.family_id;
@@ -110,20 +111,23 @@ export default function SchedulePage() {
             if (famData?.name) {
               famName = famData.name;
             } else {
-              // fallback to roster match
-              const match = roster.find((p: any) => p.family_id === myFamId);
+              // fallback to roster match by family_id
+              const match = roster.find((p: any) => String(p.family_id) === String(myFamId));
               if (match?.family?.name) famName = match.family.name;
             }
           }
-          if (!famName && roster && roster.length) {
-            famName = roster[0]?.family?.name || '';
+          // If still no family linked, use profile last_name suggestion or roster first as soft hint (but do not store Unknown)
+          if (!famName) {
+            if (profData?.last_name) famName = `${profData.last_name} Family`;
+            else if (roster && roster.length) famName = roster[0]?.family?.name || '';
           }
         } catch (e) {
           console.warn("Schedule RSVP family name lookup:", e);
           if (roster && roster.length) famName = roster[0]?.family?.name || '';
         }
       }
-      if (!famName) famName = 'Unknown Family';
+      // Only final fallback to Unknown for display; RSVP buttons will attempt live lookup too
+      if (!famName) famName = 'Family';
       setCurrentFamilyName(famName);
     } catch (e: any) {
       console.error("Schedule error:", e);
@@ -131,7 +135,7 @@ export default function SchedulePage() {
       setEvents([]);
       setRsvpCounts({});
       setRsvpsByEvent({});
-      setCurrentFamilyName('Unknown Family');
+      setCurrentFamilyName('Family');
     } finally {
       setLoading(false);
     }

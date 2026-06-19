@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Search, Users } from 'lucide-react';
-import { getRoster, updatePlayer, deletePlayer } from '@/lib/actions';
+import { getRoster, updatePlayer, deletePlayer, getFamilies } from '@/lib/actions';
 
 interface RosterPlayer {
   id: string;
@@ -52,8 +52,23 @@ export default function RosterPage() {
     phone: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const [familiesList, setFamiliesList] = useState<any[]>([]);
+  const [selectedFamily, setSelectedFamily] = useState('');
 
   const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+
+  const loadFamilies = async () => {
+    try {
+      const fams = await getFamilies();
+      setFamiliesList(fams || []);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (isCoach) {
+      loadFamilies();
+    }
+  }, [isCoach]);
 
   // Load roster data
   const loadRoster = async () => {
@@ -164,7 +179,9 @@ export default function RosterPage() {
       first_name: '', last_name: '', date_of_birth: '', position: '', jersey_number: '', notes: '',
       name: '', parent_names: '', email: '', phone: '',
     });
+    setSelectedFamily('');
     setDialogOpen(true);
+    loadFamilies();
   };
 
   const openEdit = (player: RosterPlayer) => {
@@ -181,6 +198,7 @@ export default function RosterPage() {
       email: player.family?.email || '',
       phone: player.family?.phone || '',
     });
+    setSelectedFamily('');
     setDialogOpen(true);
   };
 
@@ -262,21 +280,12 @@ export default function RosterPage() {
           const supabase = createClient();
 
           try {
-            const famName = payload.name || `${payload.last_name} Family`;
-
             let familyId: string;
 
-            // Find or create family safely, using correct columns (name not family_name)
-            const { data: existingFam } = await (supabase as any)
-              .from('families')
-              .select('id')
-              .ilike('name', famName)
-              .limit(1)
-              .maybeSingle();
-
-            if (existingFam?.id) {
-              familyId = existingFam.id;
-              // Update contacts if provided (correct columns)
+            if (selectedFamily) {
+              // Use selected existing family
+              familyId = selectedFamily;
+              // Update contacts if provided
               if (payload.email || payload.phone || payload.parent_names) {
                 await (supabase as any)
                   .from('families')
@@ -288,21 +297,46 @@ export default function RosterPage() {
                   .eq('id', familyId);
               }
             } else {
-              const { data: newFam, error: famErr } = await (supabase as any)
-                .from('families')
-                .insert({
-                  name: famName,  // correct column: name (not family_name)
-                  email: payload.email || null,
-                  phone: payload.phone || null,
-                  parent_names: payload.parent_names || null,
-                } as any)
-                .select('id')
-                .single();
+              // Create new or find by name (name optional, auto from last)
+              const famName = payload.name || `${payload.last_name} Family`;
 
-              if (famErr || !newFam?.id) {
-                throw new Error(famErr?.message || 'Failed to create family');
+              // Find or create family safely, using correct columns (name not family_name)
+              const { data: existingFam } = await (supabase as any)
+                .from('families')
+                .select('id')
+                .ilike('name', famName)
+                .limit(1)
+                .maybeSingle();
+
+              if (existingFam?.id) {
+                familyId = existingFam.id;
+                if (payload.email || payload.phone || payload.parent_names) {
+                  await (supabase as any)
+                    .from('families')
+                    .update({
+                      email: payload.email || null,
+                      phone: payload.phone || null,
+                      parent_names: payload.parent_names || null,
+                    } as any)
+                    .eq('id', familyId);
+                }
+              } else {
+                const { data: newFam, error: famErr } = await (supabase as any)
+                  .from('families')
+                  .insert({
+                    name: famName,  // correct column: name
+                    email: payload.email || null,
+                    phone: payload.phone || null,
+                    parent_names: payload.parent_names || null,
+                  } as any)
+                  .select('id')
+                  .single();
+
+                if (famErr || !newFam?.id) {
+                  throw new Error(famErr?.message || 'Failed to create family');
+                }
+                familyId = newFam.id;
               }
-              familyId = newFam.id;
             }
 
             // Insert player linked to family
@@ -321,6 +355,40 @@ export default function RosterPage() {
 
             if (playerErr) {
               throw new Error(playerErr.message || 'Failed to add player');
+            }
+
+            // Auto-link current signed-in user's profile to this family (for RSVP name etc)
+            // Also link matching parent profile by email if given (helps parents who sign up later)
+            try {
+              const { data: { user: curr } } = await supabase.auth.getUser();
+              if (curr) {
+                const { data: prof } = await (supabase as any)
+                  .from('profiles')
+                  .select('family_id')
+                  .eq('id', curr.id)
+                  .maybeSingle();
+                if (!prof?.family_id) {
+                  await (supabase as any)
+                    .from('profiles')
+                    .update({ family_id: familyId })
+                    .eq('id', curr.id);
+                }
+              }
+              if (payload.email) {
+                const { data: byEmail } = await (supabase as any)
+                  .from('profiles')
+                  .select('id, family_id')
+                  .eq('email', payload.email)
+                  .maybeSingle();
+                if (byEmail && !byEmail.family_id) {
+                  await (supabase as any)
+                    .from('profiles')
+                    .update({ family_id: familyId })
+                    .eq('id', byEmail.id);
+                }
+              }
+            } catch (linkErr) {
+              console.warn('Roster add: non-fatal profile family link skipped', linkErr);
             }
 
             toast.success('Player added to roster');
@@ -444,10 +512,34 @@ export default function RosterPage() {
                       <Input id="pos" placeholder="Pitcher, Catcher..." value={formData.position} onChange={e => setFormData({ ...formData, position: e.target.value })} />
                     </div>
                     <div>
-                      <Label htmlFor="fam">Family Name</Label>
-                      <Input id="fam" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Johnson Family (auto-generated from last name if blank)" />
+                      <Label>Family (select existing or create new)</Label>
+                      <select
+                        value={selectedFamily}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSelectedFamily(v);
+                          if (v) {
+                            const f = familiesList.find((ff: any) => ff.id === v);
+                            if (f) setFormData({ ...formData, name: f.name });
+                          }
+                        }}
+                        className="w-full border rounded-md p-2 bg-background"
+                      >
+                        <option value="">-- Create new family (or type below) --</option>
+                        {familiesList.map((f: any) => (
+                          <option key={f.id} value={f.id}>{f.name}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Players link to the family via family_id for correct RSVPs and grouping.</p>
                     </div>
                   </div>
+
+                  {!selectedFamily && (
+                    <div>
+                      <Label htmlFor="fam">New Family Name (auto from last name if blank)</Label>
+                      <Input id="fam" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. Johnson Family" />
+                    </div>
+                  )}
 
                   <div>
                     <Label htmlFor="parents">Parent / Guardian Names</Label>

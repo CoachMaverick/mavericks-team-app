@@ -98,7 +98,7 @@ export default async function DashboardPage() {
         const rsvpListRaw = rsvpsForUpcoming[ev.id] || [];
         const rsvpList = rsvpListRaw.length > 0
           ? rsvpListRaw.map((r: any) => {
-              const fam = r.family_name || 'Unknown Family';
+              const fam = r.family_name || 'A Family';
               const resp = r.response ? r.response.charAt(0).toUpperCase() + r.response.slice(1) : '';
               return `${fam} - ${resp}`;
             }).join(' • ')

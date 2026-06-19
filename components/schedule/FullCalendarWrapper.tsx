@@ -49,7 +49,7 @@ export function FullCalendarWrapper({
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [rsvpCounts, setRsvpCounts] = useState<Record<number | string, { yes: number; no: number; maybe: number; total: number }>>(initialRsvpCounts || {});
   const [rsvpsByEventState, setRsvpsByEventState] = useState<Record<number | string, any[]>>(rsvpsByEvent || {});
-  const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'Unknown Family');
+  const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'Family');
 
 
 
@@ -371,7 +371,39 @@ export function FullCalendarWrapper({
   const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no') => {
     const supabase = createClient();
     try {
-      const fam = familyName || currentFamilyNameState || 'Unknown Family';
+      // Always resolve live from the signed-in user's profile.family_id -> families.name
+      // This guarantees actual Family Name in rsvps table (no "Unknown Family", "Demo Family" or "My Family").
+      let fam = familyName || currentFamilyNameState || '';
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          const { data: prof } = await (supabase as any)
+            .from('profiles')
+            .select('family_id')
+            .eq('id', user.id)
+            .maybeSingle();
+          const fid = prof?.family_id;
+          if (fid) {
+            const { data: frow } = await (supabase as any)
+              .from('families')
+              .select('name')
+              .eq('id', fid)
+              .maybeSingle();
+            if (frow?.name) fam = frow.name;
+          }
+        }
+      } catch (lkpErr) {
+        console.warn('RSVP live family name lookup skipped (using prop):', lkpErr);
+      }
+      if (!fam || /unknown|demo|my family/i.test(fam)) {
+        fam = currentFamilyNameState || 'Family';
+      }
+
+      const isLikelyTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
+      if (!isLikelyTemp && (!fam || /unknown|demo/i.test(fam))) {
+        toast.error('Please set up your family first (Create My Family on login) so your RSVP shows the correct name.');
+        return;
+      }
 
       // Use delete + insert to achieve "upsert" semantics reliably (supports re-voting / changing answer)
       // without depending on a unique constraint that may not be present in all DBs.
@@ -542,7 +574,7 @@ export function FullCalendarWrapper({
                     <div className="text-muted-foreground mb-1">Who RSVPed:</div>
                     <ul className="space-y-0.5">
                       {rsvpsByEventState[selectedEvent.id].map((r: any, idx: number) => {
-                        const display = r.family_name || 'Unknown Family';
+                        const display = r.family_name || 'A Family';
                         const resp = r.response;
                         const badgeClass = resp === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                         return (

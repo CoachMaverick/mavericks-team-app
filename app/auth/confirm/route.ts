@@ -86,6 +86,24 @@ export async function GET(request: Request) {
     }
 
     // Normal flows (signup confirm, magic link, etc.): go to dashboard or ?next
+    // But first: if this is a parent (no family yet), send to login page so the family setup prompt shows immediately.
+    // This ensures "on signup / first login" flow for create/join family + profile.family_id link.
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("family_id, role")
+          .eq("id", user.id)
+          .maybeSingle() as any;
+        const needsFamily = !prof?.family_id && (prof?.role !== 'coach' && prof?.role !== 'admin');
+        if (needsFamily) {
+          const loginUrl = `${configuredSite}/login?prompt=family`;
+          return NextResponse.redirect(loginUrl);
+        }
+      }
+    } catch {}
+
     const forwardedHost = request.headers.get("x-forwarded-host");
     const isLocalEnv = process.env.NODE_ENV === "development";
 

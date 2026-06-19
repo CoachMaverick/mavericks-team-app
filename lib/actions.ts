@@ -32,9 +32,32 @@ export async function createRsvp(eventId: number | string, playerId: string, sta
 
     const supabase = isTemp ? await getSupabaseForReadWrite() : await createClient();
 
-    // Use provided or fallback family name (real users should pass actual family name from roster/profile)
-    let familyName = playerId || "Unknown Family";
-    if (isTemp && !playerId) familyName = "Johnson Family"; // pick from demo roster data
+    // Resolve real family name: prefer profile.family_id -> families.name for signed-in parent
+    let familyName = "Unknown Family";
+    if (isTemp) {
+      familyName = "Johnson Family";
+    } else {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          const { data: prof } = await (supabase as any)
+            .from('profiles')
+            .select('family_id')
+            .eq('id', user.id)
+            .maybeSingle();
+          const fid = prof?.family_id;
+          if (fid) {
+            const { data: famRow } = await (supabase as any)
+              .from('families')
+              .select('name')
+              .eq('id', fid)
+              .maybeSingle();
+            if (famRow?.name) familyName = famRow.name;
+          }
+        }
+      } catch {}
+      if (familyName === 'Unknown Family' && playerId) familyName = playerId; // last resort
+    }
 
     // Delete-then-insert = robust upsert (handles vote changes, avoids dup rows)
     // even when table has no (event_id, family_name) unique constraint yet.
@@ -397,6 +420,39 @@ export async function getFamilies() {
     console.warn('[getFamilies] error (returning empty):', e?.message);
     return [];
   }
+}
+
+export async function listAllFamilies() {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { createClient: createSupabaseJs } = await import("@supabase/supabase-js");
+    let supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    supaUrl = supaUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+    const supabase = createSupabaseJs(supaUrl, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { data } = await supabase.from('families').select('id, name').order('name');
+    return data || [];
+  }
+  const supabase = await createClient();
+  const { data } = await supabase.from('families').select('id, name').order('name');
+  return data || [];
+}
+
+export async function createFamilyAndLink(name: string) {
+  const supabase = await getSupabaseForReadWrite();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  const { data: newFam, error } = await supabase.from('families').insert({ name: name.trim() }).select('id').single();
+  if (error || !newFam) throw error || new Error('Failed to create family');
+  await (supabase as any).from('profiles').update({ family_id: newFam.id }).eq('id', user.id);
+  return { id: newFam.id, name };
+}
+
+export async function joinExistingFamily(familyId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  const { error } = await (supabase as any).from('profiles').update({ family_id: familyId }).eq('id', user.id);
+  if (error) throw error;
+  return { success: true };
 }
 
 export async function getPlayers() {
