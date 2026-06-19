@@ -34,7 +34,7 @@ export async function createRsvp(eventId: number | string, playerId: string, sta
 
     // Use provided or fallback family name (real users should pass actual family name from roster/profile)
     let familyName = playerId || "Unknown Family";
-    if (isTemp) familyName = "Demo Family"; // legacy temp default; prefer real name passed in
+    if (isTemp && !playerId) familyName = "Johnson Family"; // pick from demo roster data
 
     // Delete-then-insert = robust upsert (handles vote changes, avoids dup rows)
     // even when table has no (event_id, family_name) unique constraint yet.
@@ -536,7 +536,7 @@ export async function createPlayer(data: {
     .select('id')
     .ilike('name', data.family_name)
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (existingFam?.id) {
     familyId = existingFam.id;

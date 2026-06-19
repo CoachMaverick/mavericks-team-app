@@ -10,8 +10,7 @@ export default function SchedulePage() {
   const [events, setEvents] = useState<any[]>([]);
   const [rsvpCounts, setRsvpCounts] = useState<any>({});
   const [rsvpsByEvent, setRsvpsByEvent] = useState<any>({});
-  const [rosterPlayers, setRosterPlayers] = useState<any[]>([]);
-  const [currentFamilyName, setCurrentFamilyName] = useState<string>('My Family');
+  const [currentFamilyName, setCurrentFamilyName] = useState<string>('Unknown Family');
   const [isCoach, setIsCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -89,10 +88,9 @@ export default function SchedulePage() {
         console.error("Schedule error:", e);
         return [] as any[];
       });
-      setRosterPlayers(roster);
 
       // Determine current user's actual family name from profile + families table (use real family name, not "Demo Family" or "My Family")
-      let famName = 'My Family';
+      let famName = '';
       if (isTemp) {
         famName = (roster && roster.length && roster[0]?.family?.name) || 'Johnson Family';
       } else if (currentUser) {
@@ -117,10 +115,15 @@ export default function SchedulePage() {
               if (match?.family?.name) famName = match.family.name;
             }
           }
+          if (!famName && roster && roster.length) {
+            famName = roster[0]?.family?.name || '';
+          }
         } catch (e) {
           console.warn("Schedule RSVP family name lookup:", e);
+          if (roster && roster.length) famName = roster[0]?.family?.name || '';
         }
       }
+      if (!famName) famName = 'Unknown Family';
       setCurrentFamilyName(famName);
     } catch (e: any) {
       console.error("Schedule error:", e);
@@ -128,8 +131,7 @@ export default function SchedulePage() {
       setEvents([]);
       setRsvpCounts({});
       setRsvpsByEvent({});
-      setRosterPlayers([]);
-      setCurrentFamilyName('My Family');
+      setCurrentFamilyName('Unknown Family');
     } finally {
       setLoading(false);
     }
@@ -187,7 +189,6 @@ export default function SchedulePage() {
               isCoach={isCoach}
               initialRsvpCounts={rsvpCounts}
               rsvpsByEvent={rsvpsByEvent}
-              rosterPlayers={rosterPlayers}
               currentFamilyName={currentFamilyName}
               showAddDialog={showAddDialog}
               onShowAddDialogChange={setShowAddDialog}

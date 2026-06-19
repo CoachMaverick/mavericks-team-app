@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Search, Users } from 'lucide-react';
-import { getRoster, updatePlayer, deletePlayer } from '@/lib/actions';
+import { getRoster, createPlayer, updatePlayer, deletePlayer } from '@/lib/actions';
 
 interface RosterPlayer {
   id: string;
@@ -191,8 +191,8 @@ export default function RosterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.first_name || !formData.last_name || !formData.name) {
-      toast.error('First name, last name and family name are required');
+    if (!formData.first_name || !formData.last_name) {
+      toast.error('First name and last name are required');
       return;
     }
     setSubmitting(true);
@@ -213,7 +213,7 @@ export default function RosterPage() {
                 ...payload,
                 family: {
                   ...p.family,
-                  name: payload.name,
+                  name: payload.name || `${payload.last_name} Family`,
                   email: payload.email || null,
                   phone: payload.phone || null,
                   parent_names: payload.parent_names || null,
@@ -225,6 +225,7 @@ export default function RosterPage() {
         } else {
           const newId = `temp-player-${Date.now()}`;
           const newFamId = `temp-family-${Date.now()}`;
+          const famName = payload.name || `${payload.last_name} Family`;
           const newPlayer: RosterPlayer = {
             id: newId,
             first_name: payload.first_name,
@@ -235,7 +236,7 @@ export default function RosterPage() {
             notes: payload.notes || null,
             family: {
               id: newFamId,
-              name: payload.name,
+              name: famName,
               email: payload.email || null,
               phone: payload.phone || null,
               parent_names: payload.parent_names || null,
@@ -257,80 +258,12 @@ export default function RosterPage() {
           await updatePlayer(editingPlayer.id, updateData as any);
           toast.success('Player updated');
         } else {
-          // Direct client insert for add player + family. Use safe try/catch + proper field mapping to table columns.
-          const { createClient } = await import('@/lib/supabase/client');
-          const supabase = createClient();
-
-          try {
-            const famName = (payload.name || '').trim();
-            if (!famName) throw new Error('Family name is required');
-
-            let familyId: string;
-
-            // Find existing family by name (case-insensitive)
-            const { data: existingFam } = await (supabase as any)
-              .from('families')
-              .select('id')
-              .ilike('name', famName)
-              .limit(1)
-              .maybeSingle();
-
-            if (existingFam?.id) {
-              familyId = existingFam.id;
-              // Update contact info if provided (map to table columns)
-              if (payload.email || payload.phone || payload.parent_names) {
-                await (supabase as any)
-                  .from('families')
-                  .update({
-                    email: payload.email || null,
-                    phone: payload.phone || null,
-                    parent_names: payload.parent_names || null,
-                  } as any)
-                  .eq('id', familyId);
-              }
-            } else {
-              // Create new family - use exact column names from schema
-              const familyData = {
-                name: famName,
-                email: payload.email || null,
-                phone: payload.phone || null,
-                parent_names: payload.parent_names || null,
-              };
-              const { data: newFam, error: famErr } = await (supabase as any)
-                .from('families')
-                .insert(familyData as any)
-                .select('id')
-                .single();
-
-              if (famErr || !newFam?.id) {
-                throw new Error(famErr?.message || 'Failed to create family');
-              }
-              familyId = newFam.id;
-            }
-
-            // Insert player - map to exact columns that exist in players table
-            const playerData = {
-              family_id: familyId,
-              first_name: (payload.first_name || '').trim(),
-              last_name: (payload.last_name || '').trim(),
-              date_of_birth: payload.date_of_birth || null,
-              position: payload.position || null,
-              jersey_number: payload.jersey_number || null,
-              notes: payload.notes || null,
-              is_active: true,
-            };
-            const { error: playerErr } = await (supabase as any)
-              .from('players')
-              .insert(playerData as any);
-
-            if (playerErr) {
-              throw new Error(playerErr.message || 'Failed to add player');
-            }
-
-            toast.success('Player added to roster');
-          } catch (insertErr: any) {
-            throw new Error(insertErr?.message || 'Failed to create player and/or family');
-          }
+          const createData = {
+            ...payload,
+            family_name: payload.name || `${payload.last_name} Family`,
+          };
+          await createPlayer(createData as any);
+          toast.success('Player added to roster');
         }
         await loadRoster();
       }
@@ -448,8 +381,8 @@ export default function RosterPage() {
                       <Input id="pos" placeholder="Pitcher, Catcher..." value={formData.position} onChange={e => setFormData({ ...formData, position: e.target.value })} />
                     </div>
                     <div>
-                      <Label htmlFor="fam">Family Name *</Label>
-                      <Input id="fam" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} required placeholder="Johnson Family" />
+                      <Label htmlFor="fam">Family Name</Label>
+                      <Input id="fam" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Johnson Family (auto-generated from last name if blank)" />
                     </div>
                   </div>
 

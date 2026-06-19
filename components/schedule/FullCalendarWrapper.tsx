@@ -22,7 +22,6 @@ interface FullCalendarWrapperProps {
   isCoach: boolean;
   initialRsvpCounts?: Record<number | string, { yes: number; no: number; maybe: number; total: number }>;
   rsvpsByEvent?: Record<number | string, any[]>;
-  rosterPlayers?: any[];
   currentFamilyName?: string;
   showAddDialog?: boolean;
   onShowAddDialogChange?: (open: boolean) => void;
@@ -41,7 +40,6 @@ export function FullCalendarWrapper({
   isCoach,
   initialRsvpCounts = {},
   rsvpsByEvent = {},
-  rosterPlayers = [],
   currentFamilyName,
   showAddDialog: showAddDialogProp,
   onShowAddDialogChange,
@@ -51,8 +49,7 @@ export function FullCalendarWrapper({
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [rsvpCounts, setRsvpCounts] = useState<Record<number | string, { yes: number; no: number; maybe: number; total: number }>>(initialRsvpCounts || {});
   const [rsvpsByEventState, setRsvpsByEventState] = useState<Record<number | string, any[]>>(rsvpsByEvent || {});
-  const [rosterPlayersState, setRosterPlayersState] = useState<any[]>(rosterPlayers || []);
-  const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'My Family');
+  const [currentFamilyNameState, setCurrentFamilyNameState] = useState<string>(currentFamilyName || 'Unknown Family');
 
 
 
@@ -64,10 +61,6 @@ export function FullCalendarWrapper({
   useEffect(() => {
     if (rsvpsByEvent) setRsvpsByEventState(rsvpsByEvent);
   }, [rsvpsByEvent]);
-
-  useEffect(() => {
-    if (rosterPlayers) setRosterPlayersState(rosterPlayers);
-  }, [rosterPlayers]);
 
   useEffect(() => {
     if (currentFamilyName) setCurrentFamilyNameState(currentFamilyName);
@@ -378,7 +371,7 @@ export function FullCalendarWrapper({
   const handleRsvp = async (eventId: number | string, familyName: string, status: 'yes' | 'no') => {
     const supabase = createClient();
     try {
-      const fam = familyName || currentFamilyNameState || 'My Family';
+      const fam = familyName || currentFamilyNameState || 'Unknown Family';
 
       // Use delete + insert to achieve "upsert" semantics reliably (supports re-voting / changing answer)
       // without depending on a unique constraint that may not be present in all DBs.
