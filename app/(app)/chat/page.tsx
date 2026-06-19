@@ -158,7 +158,8 @@ export default function ChatPage() {
         .update({ reactions })
         .eq('id', id);
       if (error) throw error;
-      // Realtime + load will keep in sync; no forced reload needed for speed
+      // Ensure DB state is loaded for persistence (survives refresh) and sync
+      loadMessages();
     } catch (err: any) {
       console.error('Reaction error:', err);
       alert(`Reacted with ${emoji}`);
@@ -239,7 +240,7 @@ export default function ChatPage() {
                             <span
                               key={emoji}
                               onClick={() => toggleReaction(msg.id, emoji)}
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-zinc-700/70 rounded-full cursor-pointer hover:bg-zinc-600 active:scale-95 transition"
+                              className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-zinc-700/70 rounded-full text-xs cursor-pointer hover:bg-zinc-600 active:scale-95 transition select-none"
                               title="Toggle your reaction"
                             >
                               {emoji} {count}
