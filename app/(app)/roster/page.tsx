@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Search, Users } from 'lucide-react';
-import { getRoster, updatePlayer, deletePlayer, getFamilies } from '@/lib/actions';
+import { getRoster, updatePlayer, deletePlayer, getFamilies, listAllFamilies } from '@/lib/actions';
+import { FamilySetupDialog } from '@/components/FamilySetupDialog';
 
 interface RosterPlayer {
   id: string;
@@ -54,6 +55,9 @@ export default function RosterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [familiesList, setFamiliesList] = useState<any[]>([]);
   const [selectedFamily, setSelectedFamily] = useState('');
+
+  // For parents: family setup accessible later (from Roster)
+  const [familySetupOpen, setFamilySetupOpen] = useState(false);
 
   const isTemp = typeof document !== 'undefined' && document.cookie.includes('temp-coach=1');
 
@@ -468,6 +472,17 @@ export default function RosterPage() {
               className="pl-9"
             />
           </div>
+
+          {!isCoach && (
+            <Button
+              variant="outline"
+              onClick={() => setFamilySetupOpen(true)}
+              className="gap-2 whitespace-nowrap"
+            >
+              Set up my family
+            </Button>
+          )}
+
           {isCoach && (
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
@@ -647,6 +662,19 @@ export default function RosterPage() {
       {!isCoach && (
         <p className="text-center text-xs text-muted-foreground">Contact your coach to update player info or add new teammates.</p>
       )}
+
+      {/* Reusable family setup dialog for parents (accessible later from Roster) */}
+      <FamilySetupDialog
+        open={familySetupOpen}
+        onOpenChange={setFamilySetupOpen}
+        onComplete={() => {
+          // Refresh roster data (in case family info affects grouping/names in future)
+          loadRoster();
+        }}
+        title="Set Up Your Family"
+        description="Create or join your family so your RSVPs show your real name on Schedule and Dashboard."
+        showSkip={true}
+      />
     </div>
     </ErrorBoundary>
   );

@@ -69,6 +69,7 @@ export async function GET(request: Request) {
             first_name: "",
             last_name: "",
             is_admin: false,
+            has_completed_onboarding: false,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as any);
@@ -93,11 +94,12 @@ export async function GET(request: Request) {
       if (user?.id) {
         const { data: prof } = await supabase
           .from("profiles")
-          .select("family_id, role")
+          .select("family_id, role, has_completed_onboarding")
           .eq("id", user.id)
           .maybeSingle() as any;
-        const needsFamily = !prof?.family_id && (prof?.role !== 'coach' && prof?.role !== 'admin');
-        if (needsFamily) {
+        const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id)) &&
+          (prof?.role !== 'coach' && prof?.role !== 'admin');
+        if (needsSetup) {
           const loginUrl = `${configuredSite}/login?prompt=family`;
           return NextResponse.redirect(loginUrl);
         }

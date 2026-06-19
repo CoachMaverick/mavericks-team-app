@@ -442,7 +442,7 @@ export async function createFamilyAndLink(name: string) {
   if (!user) throw new Error('Not authenticated');
   const { data: newFam, error } = await supabase.from('families').insert({ name: name.trim() }).select('id').single();
   if (error || !newFam) throw error || new Error('Failed to create family');
-  await (supabase as any).from('profiles').update({ family_id: newFam.id }).eq('id', user.id);
+  await (supabase as any).from('profiles').update({ family_id: newFam.id, has_completed_onboarding: true }).eq('id', user.id);
   return { id: newFam.id, name };
 }
 
@@ -450,7 +450,17 @@ export async function joinExistingFamily(familyId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
-  const { error } = await (supabase as any).from('profiles').update({ family_id: familyId }).eq('id', user.id);
+  const { error } = await (supabase as any).from('profiles').update({ family_id: familyId, has_completed_onboarding: true }).eq('id', user.id);
+  if (error) throw error;
+  return { success: true };
+}
+
+// Allow skipping family setup on first login (or later) — marks onboarding complete so prompt never shows again
+export async function skipFamilySetup() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  const { error } = await (supabase as any).from('profiles').update({ has_completed_onboarding: true }).eq('id', user.id);
   if (error) throw error;
   return { success: true };
 }

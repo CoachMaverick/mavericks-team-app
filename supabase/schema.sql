@@ -22,7 +22,8 @@ create table if not exists public.profiles (
   last_active_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
-  is_admin boolean default false
+  is_admin boolean default false,
+  has_completed_onboarding boolean default false
 );
 
 -- Auto-create profile on new auth user (best practice)
@@ -32,8 +33,8 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, role, first_name, last_name)
-  values (new.id, 'parent', '', '');
+  insert into public.profiles (id, role, first_name, last_name, has_completed_onboarding)
+  values (new.id, 'parent', '', '', false);
   return new;
 end;
 $$;
@@ -444,6 +445,9 @@ ALTER TABLE IF EXISTS public.profiles ALTER COLUMN family_id TYPE text;
 
 -- Add is_admin column for proper admin detection (prefer over role='admin' or temp bypass)
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false;
+
+-- Add onboarding flag so family setup prompt only shows on very first login (parents can skip and complete later from Roster)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_completed_onboarding boolean DEFAULT false;
 
 -- (is_pinned + updated_at ensured early in migrations above)
 

@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Loader2, Mail } from "lucide-react";
 import { TeamLogo } from "@/components/TeamLogo";
 import { createClient } from "@/lib/supabase/client";
-import { listAllFamilies, createFamilyAndLink, joinExistingFamily } from '@/lib/actions';
+import { listAllFamilies, createFamilyAndLink, joinExistingFamily, skipFamilySetup } from '@/lib/actions';
 
 function LoginContent() {
   const [email, setEmail] = useState("");
@@ -67,9 +67,10 @@ function LoginContent() {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          const { data: prof } = await supabase.from('profiles').select('family_id, last_name').eq('id', session.user.id).maybeSingle() as any;
+          const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', session.user.id).maybeSingle() as any;
           const forcePrompt = searchParams.get('prompt') === 'family';
-          if (!prof?.family_id || forcePrompt) {
+          const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
+          if (needsSetup || forcePrompt) {
             setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
             const fams = await listAllFamilies();
             setAllFamilies(fams);
@@ -131,6 +132,7 @@ function LoginContent() {
                 first_name: "",
                 last_name: "",
                 is_admin: false,
+                has_completed_onboarding: false,
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -183,6 +185,7 @@ function LoginContent() {
                 first_name: "",
                 last_name: "",
                 is_admin: false,
+                has_completed_onboarding: false,
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -242,8 +245,9 @@ function LoginContent() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: prof } = await supabase.from('profiles').select('family_id, last_name').eq('id', user.id).maybeSingle() as any;
-        if (!prof?.family_id) {
+        const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', user.id).maybeSingle() as any;
+        const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
+        if (needsSetup) {
           setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
           const fams = await listAllFamilies();
           setAllFamilies(fams);
@@ -303,6 +307,23 @@ function LoginContent() {
       }
     } catch (e: any) {
       toast.error(e.message || 'Failed');
+    } finally {
+      setFamLoading(false);
+    }
+  };
+
+  const doSkip = async () => {
+    setFamLoading(true);
+    try {
+      await skipFamilySetup();
+      toast.success("Setup skipped. You can set up your family later from the Roster page.");
+      router.push('/dashboard');
+      router.refresh();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to skip');
+      // still proceed so user isn't stuck
+      router.push('/dashboard');
+      router.refresh();
     } finally {
       setFamLoading(false);
     }
@@ -477,8 +498,12 @@ function LoginContent() {
           </Card>
         )}
 
-        <Dialog open={showFamilySetup} onOpenChange={(open) => {
+        <Dialog open={showFamilySetup} onOpenChange={async (open) => {
           if (!open) {
+            // Treat dialog dismiss (X, esc, click outside) as "skip for now" so prompt doesn't reappear on future logins
+            try {
+              await skipFamilySetup();
+            } catch {}
             router.push('/dashboard');
             router.refresh();
           }
@@ -510,6 +535,18 @@ function LoginContent() {
                 <Button onClick={doJoinByName} disabled={famLoading || !famName} variant="outline">Join</Button>
               </div>
               <p className="text-[10px] text-center text-muted-foreground">Tip: Use "Create My Family" for the quickest parent setup.</p>
+
+              <div className="pt-2 border-t">
+                <Button
+                  variant="ghost"
+                  onClick={doSkip}
+                  disabled={famLoading}
+                  className="w-full text-muted-foreground hover:text-foreground"
+                >
+                  Skip for now — I'll set up my family later
+                </Button>
+                <p className="text-[10px] text-center text-muted-foreground mt-1">You can complete family setup anytime from the Roster page.</p>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
