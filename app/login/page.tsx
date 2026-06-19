@@ -17,6 +17,8 @@ function LoginContent() {
   const [isSignupMode, setIsSignupMode] = useState(false);
   const [isResetPassword, setIsResetPassword] = useState(false);
   const [resetPassword, setResetPassword] = useState("");
+  const [confirmResetPassword, setConfirmResetPassword] = useState("");
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -39,7 +41,11 @@ function LoginContent() {
     }
     const success = searchParams.get("success");
     if (success) {
-      toast.success("Signed up successfully! You're now logged in.");
+      if (success === "reset") {
+        toast.success("Password updated successfully! Please log in with your new password.");
+      } else {
+        toast.success("Signed up successfully! You're now logged in.");
+      }
       const url = new URL(window.location.href);
       url.searchParams.delete("success");
       window.history.replaceState({}, "", url.toString());
@@ -48,6 +54,9 @@ function LoginContent() {
     if (type === "recovery") {
       setIsResetPassword(true);
       setIsSignupMode(false);
+      setResetEmailSent(false);
+      setResetPassword("");
+      setConfirmResetPassword("");
       const url = new URL(window.location.href);
       url.searchParams.delete("type");
       window.history.replaceState({}, "", url.toString());
@@ -187,11 +196,13 @@ function LoginContent() {
     setLoading(true);
     try {
       const supabase = createClient();
+      // Supabase will append token_hash and type=recovery to this URL
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/auth/confirm?type=recovery`,
+        redirectTo: `${window.location.origin}/auth/confirm`,
       });
       if (error) throw error;
-      toast.success("Password reset link sent! Check your email.");
+      toast.success("Password reset link sent! Check your email (and spam folder).");
+      setResetEmailSent(true);
     } catch (err: any) {
       let msg = err.message || "Failed to send reset link";
       if (msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("too many")) {
@@ -209,21 +220,28 @@ function LoginContent() {
       toast.error("New password must be at least 6 characters");
       return;
     }
+    if (resetPassword !== confirmResetPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
     setLoading(true);
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.updateUser({ password: resetPassword });
       if (error) throw error;
-      toast.success("Password updated successfully! Please log in.");
-      // End recovery session
+      // End the recovery session so user logs in fresh with new password
       await supabase.auth.signOut().catch(() => {});
       setIsResetPassword(false);
       setResetPassword("");
-      setPassword(""); // clear
-      // Stay on login
-      router.push("/login");
+      setConfirmResetPassword("");
+      setPassword("");
+      // Redirect to login with success flag for friendly message
+      router.push("/login?success=reset");
     } catch (err: any) {
       let msg = err.message || "Failed to reset password";
+      if (msg.toLowerCase().includes("session")) {
+        msg = "Reset session expired. Please request a new password reset link.";
+      }
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -245,128 +263,226 @@ function LoginContent() {
         <Card className="mavericks-card">
           <CardHeader>
             <CardTitle className="text-2xl">
-              {isSignupMode ? "Sign up for Mavericks 12U" : "Log in to Mavericks 12U"}
+              {isResetPassword
+                ? "Reset your password"
+                : isSignupMode
+                  ? "Create your Mavericks 12U account"
+                  : "Log in to Mavericks 12U"}
             </CardTitle>
             <CardDescription>
-              {isSignupMode
-                ? "Create your account with email and password. Instant access, no confirmation email required."
-                : "Sign in with your email and password."}
+              {isResetPassword
+                ? "Choose a new password for your account."
+                : isSignupMode
+                  ? "Sign up with email and password for instant access. A profile is created automatically."
+                  : "Enter your email and password to access the team hub."}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Simple mode switch - Email + Password focused */}
-            <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
-              <button
-                type="button"
-                onClick={() => setIsSignupMode(false)}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  !isSignupMode
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Log in
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsSignupMode(true)}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  isSignupMode
-                    ? "bg-background shadow-sm text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Sign up
-              </button>
-            </div>
-
-            <form onSubmit={handleEmailPasswordAuth} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">
-                  Email address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10"
-                    placeholder="you@example.com"
-                    required
-                  />
+            {isResetPassword ? (
+              /* Dedicated Reset Password view - shown when arriving from Supabase recovery email link */
+              <div className="space-y-4">
+                <div className="rounded-md bg-muted/60 p-3 text-sm text-muted-foreground">
+                  You are resetting the password for the account linked in your email. Enter and confirm your new password below.
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  Password {isSignupMode ? "(at least 6 characters)" : ""}
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+                <form onSubmit={handleResetPassword} className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="new-password" className="text-sm font-medium">
+                      New password
+                    </label>
+                    <Input
+                      id="new-password"
+                      type="password"
+                      value={resetPassword}
+                      onChange={(e) => setResetPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                    />
+                    <p className="text-xs text-muted-foreground">At least 6 characters.</p>
+                  </div>
 
-              <Button
-                type="submit"
-                className="mavericks-btn-primary w-full h-11 text-base"
-                disabled={loading || !email || !password}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {isSignupMode ? "Creating account..." : "Logging in..."}
-                  </>
-                ) : (
-                  isSignupMode ? "Sign up with Email + Password" : "Log in with Email + Password"
-                )}
-              </Button>
+                  <div className="space-y-2">
+                    <label htmlFor="confirm-password" className="text-sm font-medium">
+                      Confirm new password
+                    </label>
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      value={confirmResetPassword}
+                      onChange={(e) => setConfirmResetPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                    />
+                  </div>
 
-              {isSignupMode && (
-                <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                  Create your account instantly. A basic profile will be created automatically so you can get started right away. No email confirmation step required.
-                </div>
-              )}
-
-              {!isSignupMode && !isResetPassword && (
-                <p className="text-center text-xs">
-                  <button type="button" onClick={handlePasswordReset} className="underline text-muted-foreground hover:text-foreground" disabled={loading || !email}>
-                    Forgot your password?
-                  </button>
-                </p>
-              )}
-
-              <p className="text-center text-xs text-muted-foreground">
-                {isSignupMode ? (
-                  <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(false)}>Log in instead</button></>
-                ) : (
-                  <>New here? <button type="button" className="underline hover:no-underline" onClick={() => setIsSignupMode(true)}>Sign up with email + password</button></>
-                )}
-              </p>
-
-              {isResetPassword && (
-                <form onSubmit={handleResetPassword} className="space-y-4 pt-4 border-t">
-                  <div className="text-sm text-muted-foreground">Enter your new password.</div>
-                  <Input
-                    type="password"
-                    value={resetPassword}
-                    onChange={(e) => setResetPassword(e.target.value)}
-                    placeholder="New password (min 6 chars)"
-                    required
-                  />
-                  <div className="flex gap-2">
-                    <Button type="submit" className="flex-1" disabled={loading || !resetPassword}>Update Password</Button>
-                    <Button type="button" variant="outline" onClick={() => { setIsResetPassword(false); setResetPassword(""); }}>Cancel</Button>
+                  <div className="flex gap-3 pt-2">
+                    <Button
+                      type="submit"
+                      className="mavericks-btn-primary flex-1 h-11"
+                      disabled={loading || !resetPassword || !confirmResetPassword}
+                    >
+                      {loading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        "Update Password"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1 h-11"
+                      onClick={() => {
+                        setIsResetPassword(false);
+                        setResetPassword("");
+                        setConfirmResetPassword("");
+                      }}
+                      disabled={loading}
+                    >
+                      Back to login
+                    </Button>
                   </div>
                 </form>
-              )}
-            </form>
+
+                <p className="text-center text-xs text-muted-foreground">
+                  After updating, you will be asked to log in with your new password.
+                </p>
+              </div>
+            ) : (
+              /* Normal Email + Password login / signup */
+              <>
+                {/* Mode tabs - Email + Password is always primary */}
+                <div className="flex rounded-lg border p-1 mb-6 bg-muted/50">
+                  <button
+                    type="button"
+                    onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                      !isSignupMode
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Log in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                      isSignupMode
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Sign up
+                  </button>
+                </div>
+
+                <form onSubmit={handleEmailPasswordAuth} className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="email" className="text-sm font-medium">
+                      Email address
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          if (resetEmailSent) setResetEmailSent(false);
+                        }}
+                        className="pl-10"
+                        placeholder="you@example.com"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="password" className="text-sm font-medium">
+                        Password {isSignupMode ? "(min 6 characters)" : ""}
+                      </label>
+                      {/* Clear "Forgot Password?" link - only visible on login, not signup */}
+                      {!isSignupMode && (
+                        resetEmailSent ? (
+                          <span className="text-xs text-emerald-500 flex items-center gap-1">
+                            Reset link sent.
+                            <button
+                              type="button"
+                              onClick={handlePasswordReset}
+                              disabled={loading || !email}
+                              className="underline hover:no-underline disabled:opacity-50"
+                            >
+                              Resend
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handlePasswordReset}
+                            disabled={loading || !email}
+                            className="text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Forgot Password?
+                          </button>
+                        )
+                      )}
+                    </div>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                    />
+                    {isSignupMode && (
+                      <p className="text-xs text-muted-foreground">Must be at least 6 characters long.</p>
+                    )}
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="mavericks-btn-primary w-full h-11 text-base"
+                    disabled={loading || !email || !password}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {isSignupMode ? "Creating account..." : "Logging in..."}
+                      </>
+                    ) : (
+                      isSignupMode ? "Sign up with Email + Password" : "Log in with Email + Password"
+                    )}
+                  </Button>
+
+                  {/* Helpful instructions */}
+                  {isSignupMode ? (
+                    <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                      Create your account instantly with email + password. A basic parent profile is created automatically. No email confirmation needed to get started.
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground text-center">
+                      Use the same email you registered with the team.
+                    </div>
+                  )}
+
+                  <p className="text-center text-xs text-muted-foreground pt-1">
+                    {isSignupMode ? (
+                      <>Already have an account? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(false); setResetEmailSent(false); }}>Log in instead</button></>
+                    ) : (
+                      <>New here? <button type="button" className="underline hover:no-underline" onClick={() => { setIsSignupMode(true); setResetEmailSent(false); }}>Sign up with email + password</button></>
+                    )}
+                  </p>
+                </form>
+              </>
+            )}
           </CardContent>
         </Card>
 
