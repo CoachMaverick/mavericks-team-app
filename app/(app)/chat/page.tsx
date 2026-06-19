@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { pinMessage, editMessage, deleteMessage } from '@/lib/actions';
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isCoach, setIsCoach] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const supabase = createClient();
@@ -24,18 +25,18 @@ export default function ChatPage() {
             .select('role, is_admin')
             .eq('id', user.id)
             .single();
-          let coach = profile && (profile.role === 'coach' || profile.role === 'admin' || profile.is_admin === true);
-          // Force admin/coach for the designated coach email as fallback
+          let admin = profile && (profile.role === 'coach' || profile.role === 'admin' || profile.is_admin === true);
+          // Force admin for the designated coach email as fallback
           if (user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
-            coach = true;
+            admin = true;
           }
-          setIsCoach(!!coach);
+          setIsAdmin(!!admin);
         } catch (e) {
           // Fallback for the coach email even on profile fetch error
           if (user.email?.toLowerCase() === "coach@comavericksbaseball.com") {
-            setIsCoach(true);
+            setIsAdmin(true);
           } else {
-            setIsCoach(false);
+            setIsAdmin(false);
           }
         }
       }
@@ -98,56 +99,38 @@ export default function ChatPage() {
     }
   };
 
-  const editMessage = async (msg: any) => {
+  const handleEditMessage = async (msg: any) => {
     const newContent = prompt('Edit message:', msg.content);
     if (newContent === null || newContent.trim() === msg.content) return;
 
     try {
-      const { error } = await (supabase as any)
-        .from('messages')
-        .update({ content: newContent.trim() })
-        .eq('id', msg.id);
-
-      if (error) throw error;
-
+      await editMessage(msg.id, newContent.trim());
       loadMessages();
     } catch (e: any) {
       console.error('Edit error:', e);
-      alert('Failed to edit message');
+      alert(e.message || 'Failed to edit message');
     }
   };
 
-  const deleteMessage = async (id: string) => {
+  const handleDeleteMessage = async (id: string) => {
     if (!confirm('Delete this message?')) return;
 
     try {
-      const { error } = await (supabase as any)
-        .from('messages')
-        .update({ is_deleted: true })
-        .eq('id', id);
-
-      if (error) throw error;
-
+      await deleteMessage(id);
       loadMessages();
     } catch (err: any) {
       console.error('Delete error:', err);
-      alert('Delete failed: ' + (err.message || 'Unknown error'));
+      alert(err.message || 'Delete failed');
     }
   };
 
-  const togglePin = async (id: string, currentlyPinned: boolean) => {
+  const handleTogglePin = async (id: string, currentlyPinned: boolean) => {
     try {
-      const { error } = await (supabase as any)
-        .from('messages')
-        .update({ is_pinned: !currentlyPinned })
-        .eq('id', id);
-
-      if (error) throw error;
-
+      await pinMessage(id, !currentlyPinned);
       loadMessages();
     } catch (err: any) {
       console.error('Pin error:', err);
-      alert('Pin/Unpin failed: ' + (err.message || 'Unknown error'));
+      alert(err.message || 'Pin/Unpin failed');
     }
   };
 
@@ -333,9 +316,9 @@ export default function ChatPage() {
                           👏
                         </button>
 
-                        {isOwn && (
+                        {(isAdmin || isOwn) && (
                           <button
-                            onClick={() => editMessage(msg)}
+                            onClick={() => handleEditMessage(msg)}
                             className="px-1.5 py-0.5 hover:bg-zinc-700 rounded transition hover:scale-110"
                             title="Edit"
                           >
@@ -343,21 +326,25 @@ export default function ChatPage() {
                           </button>
                         )}
 
-                        <button
-                          onClick={() => deleteMessage(msg.id)}
-                          className="px-1.5 py-0.5 text-red-400 hover:bg-zinc-700 rounded transition hover:scale-110"
-                          title="Delete"
-                        >
-                          🗑️
-                        </button>
+                        {(isAdmin || isOwn) && (
+                          <button
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="px-1.5 py-0.5 text-red-400 hover:bg-zinc-700 rounded transition hover:scale-110"
+                            title="Delete"
+                          >
+                            🗑️
+                          </button>
+                        )}
 
-                        <button
-                          onClick={() => togglePin(msg.id, !!msg.is_pinned)}
-                          className="px-1.5 py-0.5 text-yellow-400 hover:bg-zinc-700 rounded transition hover:scale-110"
-                          title={msg.is_pinned ? 'Unpin' : 'Pin'}
-                        >
-                          📌
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleTogglePin(msg.id, !!msg.is_pinned)}
+                            className="px-1.5 py-0.5 text-yellow-400 hover:bg-zinc-700 rounded transition hover:scale-110"
+                            title={msg.is_pinned ? 'Unpin' : 'Pin'}
+                          >
+                            📌
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

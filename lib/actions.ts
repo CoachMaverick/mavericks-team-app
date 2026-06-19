@@ -684,8 +684,12 @@ export async function pinMessage(messageId: string, isPinned: boolean) {
     .eq("id", user.id)
     .single() as { data: { role?: string; is_admin?: boolean } | null };
 
-  if (profile?.role !== "coach" && profile?.role !== "admin") {
-    throw new Error("Only coaches can pin messages");
+  let isAdmin = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+  if (user?.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+    isAdmin = true;
+  }
+  if (!isAdmin) {
+    throw new Error("Only admins can pin/unpin messages");
   }
 
   // Perform update with service-role if available (stable for pin regardless of current RLS), else normal client
@@ -759,11 +763,14 @@ export async function editMessage(messageId: string, newContent: string) {
     .eq('id', user.id)
     .single() as { data: { role?: string; is_admin?: boolean } | null };
 
-  const isCoachOrAdmin = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+  let isAdmin = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+  if (user?.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+    isAdmin = true;
+  }
   const isOwner = row.sender_id === user.id;
 
-  if (!isOwner && !isCoachOrAdmin) {
-    throw new Error('You can only edit your own messages');
+  if (!isOwner && !isAdmin) {
+    throw new Error('You can only edit your own messages (admins can edit any)');
   }
 
   // Use service role for the update to ensure it succeeds (coaches editing, RLS compatibility)
@@ -837,11 +844,14 @@ export async function deleteMessage(messageId: string) {
     .eq('id', user.id)
     .single() as { data: { role?: string; is_admin?: boolean } | null };
 
-  const isCoachOrAdmin = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+  let isAdmin = profile?.role === 'coach' || profile?.role === 'admin' || profile?.is_admin === true;
+  if (user?.email?.toLowerCase() === "coach@comavericksbaseball.com") {
+    isAdmin = true;
+  }
   const isOwner = row.sender_id === user.id;
 
-  if (!isOwner && !isCoachOrAdmin) {
-    throw new Error('You can only delete your own messages (or coaches can delete any)');
+  if (!isOwner && !isAdmin) {
+    throw new Error('You can only delete your own messages (admins can delete any)');
   }
 
   // Use service for update stability
