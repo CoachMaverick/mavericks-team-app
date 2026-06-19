@@ -67,10 +67,17 @@ function LoginContent() {
         const supabase = createClient();
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
+          const userEmail = session.user.email?.toLowerCase() || '';
+          const isAdminAccount = userEmail === 'coach@comavericksbaseball.com';
+          // Zero friction for admin/coach account: never show family setup
+          if (isAdminAccount) {
+            router.replace("/dashboard");
+            return;
+          }
           const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', session.user.id).maybeSingle() as any;
           const forcePrompt = searchParams.get('prompt') === 'family';
-          const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
-          if (needsSetup || forcePrompt) {
+          const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id));
+          if ((needsSetup || forcePrompt) && !isAdminAccount) {
             setFamName(prof?.last_name ? `${prof.last_name} Family` : '');
             const fams = await listAllFamilies();
             setAllFamilies(fams);
@@ -125,14 +132,15 @@ function LoginContent() {
               .maybeSingle();
 
             if (!existing) {
+              const isAdminAccount = (signUpData.user.email || '').toLowerCase() === 'coach@comavericksbaseball.com';
               await supabase.from("profiles").insert({
                 id: signUpData.user.id,
                 email: signUpData.user.email,
-                role: "parent",
+                role: isAdminAccount ? "admin" : "parent",
                 first_name: "",
                 last_name: "",
-                is_admin: false,
-                has_completed_onboarding: false,
+                is_admin: isAdminAccount,
+                has_completed_onboarding: isAdminAccount, // admin skips family setup entirely
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -159,7 +167,13 @@ function LoginContent() {
         }
 
         toast.success("Account created and logged in! Welcome to Mavericks 12U.");
-        await checkAndPromptFamily();
+        const isAdminSignup = emailTrimmed.toLowerCase() === 'coach@comavericksbaseball.com';
+        if (isAdminSignup) {
+          router.push('/dashboard');
+          router.refresh();
+        } else {
+          await checkAndPromptFamily();
+        }
       } else {
         // Login with Email + Password
         const { error } = await supabase.auth.signInWithPassword({
@@ -178,14 +192,15 @@ function LoginContent() {
               .eq("id", user.id)
               .maybeSingle();
             if (!existing) {
+              const isAdminAccount = (user.email || '').toLowerCase() === 'coach@comavericksbaseball.com';
               await supabase.from("profiles").insert({
                 id: user.id,
                 email: user.email,
-                role: "parent",
+                role: isAdminAccount ? "admin" : "parent",
                 first_name: "",
                 last_name: "",
-                is_admin: false,
-                has_completed_onboarding: false,
+                is_admin: isAdminAccount,
+                has_completed_onboarding: isAdminAccount,
                 created_at: new Date().toISOString(),
               } as any);
             }
@@ -195,7 +210,13 @@ function LoginContent() {
         }
 
         toast.success("Logged in successfully!");
-        await checkAndPromptFamily();
+        const isAdminLogin = emailTrimmed.toLowerCase() === 'coach@comavericksbaseball.com';
+        if (isAdminLogin) {
+          router.push('/dashboard');
+          router.refresh();
+        } else {
+          await checkAndPromptFamily();
+        }
       }
     } catch (err: any) {
       let msg = err.message || (isSignupMode ? "Signup failed" : "Login failed");
@@ -245,6 +266,13 @@ function LoginContent() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        const userEmail = user.email?.toLowerCase() || '';
+        const isAdminAccount = userEmail === 'coach@comavericksbaseball.com';
+        if (isAdminAccount) {
+          router.push("/dashboard");
+          router.refresh();
+          return;
+        }
         const { data: prof } = await supabase.from('profiles').select('family_id, has_completed_onboarding, last_name').eq('id', user.id).maybeSingle() as any;
         const needsSetup = prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id);
         if (needsSetup) {

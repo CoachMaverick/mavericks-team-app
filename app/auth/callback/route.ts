@@ -52,14 +52,15 @@ export async function GET(request: Request) {
           .maybeSingle();
 
         if (!existingProfile) {
+          const isAdminAccount = (user.email || '').toLowerCase() === 'coach@comavericksbaseball.com';
           await supabase.from("profiles").insert({
             id: user.id,
             email: user.email,
-            role: "parent",
+            role: isAdminAccount ? "admin" : "parent",
             first_name: "",
             last_name: "",
-            is_admin: false,
-            has_completed_onboarding: false,
+            is_admin: isAdminAccount,
+            has_completed_onboarding: isAdminAccount,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as any);
@@ -75,21 +76,26 @@ export async function GET(request: Request) {
     }
 
     // Auto-redirect to dashboard (or next param) - user is now logged in
-    // But if no family_id on profile (typical for new parents), redirect to /login so the family prompt triggers.
-    // Covers signup/first-login for magic links + Email+PW flows uniformly.
+    // Skip family setup completely for coach@comavericksbaseball.com (admin) for zero friction on login.
+    // Only regular users see the first-login family setup prompt.
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("family_id, role, has_completed_onboarding")
-          .eq("id", user.id)
-          .maybeSingle() as any;
-        const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id)) &&
-          (prof?.role !== 'coach' && prof?.role !== 'admin');
-        if (needsSetup) {
-          const loginUrl = `${configuredSite}/login?prompt=family`;
-          return NextResponse.redirect(loginUrl);
+        const userEmail = (user.email || '').toLowerCase();
+        if (userEmail === 'coach@comavericksbaseball.com') {
+          // Admin account: direct to dashboard, no family prompt
+        } else {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("family_id, role, has_completed_onboarding")
+            .eq("id", user.id)
+            .maybeSingle() as any;
+          const needsSetup = (prof?.has_completed_onboarding === false || (prof?.has_completed_onboarding == null && !prof?.family_id)) &&
+            (prof?.role !== 'coach' && prof?.role !== 'admin');
+          if (needsSetup) {
+            const loginUrl = `${configuredSite}/login?prompt=family`;
+            return NextResponse.redirect(loginUrl);
+          }
         }
       }
     } catch {}
