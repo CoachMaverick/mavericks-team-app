@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const token_hash = searchParams.get("token_hash");
+  const type = searchParams.get("type") as 
+    | "signup" 
+    | "magiclink" 
+    | "recovery" 
+    | "invite" 
+    | "email_change" 
+    | null;
   // if "next" is in param, use it as the redirect URL
   const next = searchParams.get("next") ?? "/dashboard";
 
@@ -14,56 +22,68 @@ export async function GET(request: Request) {
   // Falls back to the request origin. Always normalize to avoid trailing slashes causing path issues.
   const configuredSite = (process.env.NEXT_PUBLIC_APP_URL || origin).replace(/\/$/, '');
 
+  const supabase = await createClient();
+
+  let authError: any = null;
+
   if (code) {
-    const supabase = await createClient();
+    // PKCE flow (common for magic links and OAuth)
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      // Ensure new user has a basic profile (for magic link / first signup via PKCE)
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && user.id) {
-          const { data: existingProfile } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("id", user.id)
-            .maybeSingle();
-
-          if (!existingProfile) {
-            await supabase.from("profiles").insert({
-              id: user.id,
-              email: user.email,
-              role: "parent",
-              first_name: "",
-              last_name: "",
-              is_admin: false,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            } as any);
-          }
-        }
-      } catch (profileErr) {
-        console.warn("Profile creation check skipped (non-fatal):", profileErr);
-      }
-
-      const forwardedHost = request.headers.get("x-forwarded-host"); // original origin before load balancer
-      const isLocalEnv = process.env.NODE_ENV === "development";
-      let redirectUrl: string;
-      if (isLocalEnv) {
-        // we can be sure that there is no load balancer in between, so no need to watch for X-Forwarded-Host
-        redirectUrl = `${configuredSite}${next}`;
-      } else if (forwardedHost) {
-        redirectUrl = `https://${forwardedHost}${next}`;
-      } else {
-        redirectUrl = `${configuredSite}${next}`;
-      }
-      return NextResponse.redirect(redirectUrl);
-    } else {
-      // Surface the real error (e.g. invalid redirect path, bad code, etc.) to the login page
-      const message = error.message || 'auth';
-      return NextResponse.redirect(`${configuredSite}/login?error=${encodeURIComponent(message)}`);
-    }
+    authError = error;
+  } else if (token_hash && type) {
+    // Token hash flow for magic links / signup confirm
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash,
+      type,
+    });
+    authError = error;
   }
 
-  // return the user to an error page with instructions
-  return NextResponse.redirect(`${configuredSite}/login?error=auth`);
+  if (!authError) {
+    // Successfully exchanged/verified - user should be logged in now (session cookies set)
+    // Ensure new user has a basic profile automatically
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.id) {
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!existingProfile) {
+          await supabase.from("profiles").insert({
+            id: user.id,
+            email: user.email,
+            role: "parent",
+            first_name: "",
+            last_name: "",
+            is_admin: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as any);
+        }
+      }
+    } catch (profileErr) {
+      console.warn("Profile creation check skipped (non-fatal):", profileErr);
+    }
+
+    // Auto-redirect to dashboard (or next param) - user is now logged in
+    const forwardedHost = request.headers.get("x-forwarded-host"); // original origin before load balancer
+    const isLocalEnv = process.env.NODE_ENV === "development";
+    let redirectUrl: string;
+    if (isLocalEnv) {
+      // we can be sure that there is no load balancer in between, so no need to watch for X-Forwarded-Host
+      redirectUrl = `${configuredSite}${next}`;
+    } else if (forwardedHost) {
+      redirectUrl = `https://${forwardedHost}${next}`;
+    } else {
+      redirectUrl = `${configuredSite}${next}`;
+    }
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Error case - better error message
+  const errorMessage = authError?.message || "Authentication failed. The link may be invalid or expired.";
+  return NextResponse.redirect(`${configuredSite}/login?error=${encodeURIComponent(errorMessage)}`);
 }

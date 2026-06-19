@@ -42,8 +42,8 @@ function LoginContent() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email || !password) {
-      toast.error("Please enter email and password");
+    if (!email) {
+      toast.error("Please enter your email address");
       return;
     }
 
@@ -52,16 +52,29 @@ function LoginContent() {
     try {
       const supabase = createClient();
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      if (password) {
+        // Password login
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
 
-      if (error) throw error;
-
-      toast.success("Logged in successfully!");
-      router.push("/dashboard");
-      router.refresh();
+        toast.success("Logged in successfully!");
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        // No password provided - seamless magic link login (no pw required)
+        const { error } = await supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
+        if (error) throw error;
+        setMagicSent(true);
+        toast.success("Magic link sent! Check your email to log in automatically.");
+      }
     } catch (err: any) {
       toast.error(err.message || "Login failed");
     } finally {
@@ -84,7 +97,7 @@ function LoginContent() {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           shouldCreateUser: isSignup,
         },
       });
@@ -182,15 +195,14 @@ function LoginContent() {
               {mode === "login" && (
                 <div className="space-y-2">
                   <label htmlFor="password" className="text-sm font-medium">
-                    Password
+                    Password <span className="text-xs text-muted-foreground">(optional - use magic link for passwordless)</span>
                   </label>
                   <Input
                     id="password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
+                    placeholder="•••••••• (leave blank for magic link)"
                   />
                 </div>
               )}
@@ -200,7 +212,7 @@ function LoginContent() {
                   <Button
                     type="submit"
                     className="mavericks-btn-primary w-full h-11 text-base"
-                    disabled={loading || !email || !password}
+                    disabled={loading || !email}
                   >
                     {loading ? (
                       <>
@@ -208,7 +220,7 @@ function LoginContent() {
                         Logging in...
                       </>
                     ) : (
-                      "Log in with password"
+                      password ? "Log in with password" : "Send magic link to log in"
                     )}
                   </Button>
 
